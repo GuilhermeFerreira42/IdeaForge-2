@@ -1,0 +1,15 @@
+EXEMPLAR_P03 = (
+    "REFERÊNCIA DE FORMATO (use como guia de densidade, NÃO copie dados):\n\n"
+    "## Princípios Arquiteturais\n"
+    "| Princípio | Descrição Concreta | Implicação Técnica | Decisão Arquitetural Crítica |\n"
+    "|---|---|---|---|\n"
+    "| [Nome do Princípio] | [descrição em 1 frase] | [tecnologia/config específica] | "
+    "REGRA: [regra verificável por teste automatizado] |\n\n"
+    "## Diferenciais\n"
+    "| Abordagem Atual | Problema | Como Este Sistema Supera |\n"
+    "|---|---|---|\n"
+    "| [concorrente/abordagem manual] | [problema concreto com métrica] | "
+    "[como o sistema resolve com tecnologia específica] |\n\n"
+    "REGRA: Mínimo 6 princípios com REGRA: verificável. Mínimo 4 diferenciais.\n"
+    "--- FIM DA REFERÊNCIA ---\n"
+)

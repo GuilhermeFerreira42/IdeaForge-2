@@ -1,0 +1,32 @@
+# Ambientes Virtuais e Setup Python
+venv/
+env/
+.venv/
+.env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Configurações do ambiente OS
+.DS_Store
+Thumbs.db
+
+# Configurações de IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Outputs e Relatórios gerados pelo CLI
+debate_RELATORIO_*.md
+PRD_FINAL_*.md
+.forge/
+.tmp_artifacts/
+.tmp_planner/
+VALIDACAO_PAYLOAD_*/
+
+# Ferramentas de Testes e Cobertura
+.pytest_cache/
+.coverage
+htmlcov/

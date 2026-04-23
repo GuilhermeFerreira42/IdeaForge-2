@@ -1,0 +1,74 @@
+SOBRE O SEU WORKFLOW — LEIA ANTES DE INICIAR QUALQUER FASE
+══════════════════════════════════════════════════════════
+
+PROBLEMA QUE ESTE ARQUIVO RESOLVE
+──────────────────────────────────
+Antes (desperdiçava tokens e contexto)
+  "Leia todo o projeto e implemente a fase X"
+  → IA lê 50.000+ tokens de arquivos irrelevantes
+  → Consome 70% do contexto apenas para carregar
+  → Sobra pouco espaço para raciocinar e implementar
+  → Resultado: implementação superficial ou com regressões
+
+Depois (otimizado)
+  "Leia .ai-context, depois docs/CURRENT_STATE.md.
+   Aqui está o blueprint da Fase N: [conteúdo].
+   Implemente."
+  → IA lê ~2.000 tokens de estado + blueprint da fase
+  → IA lê apenas os arquivos de src/ que vai modificar
+  → 90%+ do contexto disponível para implementação
+  → Resultado: implementação focada, sem distrações
+
+──────────────────────────────────
+FLUXO PADRÃO DE CADA FASE (TDD)
+══════════════════════════════════
+
+PASSO 1 — VOCÊ planeja a fase e escreve o blueprint (usando Protocolo NEXUS)
+
+PASSO 2 — VOCÊ diz à IA:
+  "Leia .ai-context e docs/CURRENT_STATE.md.
+   A próxima fase é [Fase N] — [nome da onda] do Backlog.
+   Aqui está o blueprint: [cola ou indica o arquivo].
+   Escreva os TESTES primeiro. Depois implemente."
+
+PASSO 3 — IA escreve os TESTES primeiro (TDD)
+  → Roda: pytest tests/unit/ -v → TODOS FALHAM (código não existe)
+
+PASSO 4 — IA implementa o código
+
+PASSO 5 — IA roda os testes novamente
+  → pytest tests/unit/ -v → TODOS PASSAM ✅
+  → pytest tests/integration/ -v → TODOS PASSAM ✅
+
+PASSO 6 — VOCÊ valida (roda os testes, executa manualmente)
+
+PASSO 7 — VOCÊ diz à IA:
+  "Fase N concluída e validada.
+   Execute o protocolo docs/ARCHIVING_PROTOCOL.md."
+
+PASSO 8 — IA arquiva:
+  → Roda e reporta resultado dos testes
+  → Atualiza CURRENT_STATE + DECISION_LOG + BACKLOG_FUTURO
+  → Arquiva blueprint como .resolved
+  → Sugere mensagem de commit
+
+PASSO 9 — Você faz o commit e a próxima fase começa com contexto limpo
+
+──────────────────────────────────
+QUANDO A IA PRECISAR VER CÓDIGO QUE NÃO VAI MODIFICAR
+  Diga: "Consulte o DECISION_LOG para entender por que [módulo] funciona assim"
+  Não faça ela ler o arquivo inteiro.
+
+QUANDO UM ARTEFATO NÃO FOR ENCONTRADO
+  A IA deve parar e reportar — nunca usar fallback silencioso.
+  Exemplo correto: "Artefato [system_design] não encontrado em [parsed]. Aguardando instrução."
+  Exemplo errado: [injeta contexto geral sem avisar e continua]
+
+QUANDO OS TESTES FALHAREM
+  A IA não deve arquivar. Deve reportar a falha e aguardar.
+  O arquivamento pressupõe suíte de testes passando integralmente.
+
+QUANDO TESTES NÃO EXISTIREM ANTES DO CÓDIGO
+  A IA não deve implementar código de produção sem testes.
+  Sequência: testes → falha → código → testes passam.
+  Esta regra tem precedência sobre velocidade de entrega.

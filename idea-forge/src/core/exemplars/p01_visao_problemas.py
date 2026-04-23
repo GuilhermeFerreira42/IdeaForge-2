@@ -1,0 +1,16 @@
+EXEMPLAR_P01 = (
+    "REFERÊNCIA DE FORMATO (use como guia de densidade, NÃO copie dados):\n\n"
+    "## Visão do Produto\n"
+    "| Atributo | Valor |\n"
+    "|---|---|\n"
+    "| Codinome interno | [nome memorável do projeto] |\n"
+    "| Declaração de visão | [1 frase, máx 30 palavras, verbo infinitivo] |\n\n"
+    "## Problema e Solução\n"
+    "| ID | Problema | Impacto | Como o Sistema Resolve |\n"
+    "|---|---|---|---|\n"
+    "| P-01 | [problema técnico concreto] | [impacto mensurável: %, tempo, custo] | "
+    "[solução técnica com tecnologia específica] |\n"
+    "| P-02 | [outro problema] | [impacto com números] | [solução concreta] |\n\n"
+    "REGRA: Mínimo 6 problemas. Cada impacto DEVE ter número (%, segundos, R$).\n"
+    "--- FIM DA REFERÊNCIA ---\n"
+)

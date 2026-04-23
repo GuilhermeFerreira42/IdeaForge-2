@@ -1,0 +1,38 @@
+# INSTRUÇÕES DE CONTEXTO PARA IA — IdeaForge 2
+
+## Ler OBRIGATORIAMENTE antes de qualquer tarefa
+1. `docs/CURRENT_STATE.md` — Estado atual completo do sistema
+2. O código-fonte em `idea-forge/src/` — Apenas os arquivos que serão modificados
+
+## Ler no início de cada nova Onda
+3. `docs/BACKLOG_FUTURO.md` — Roadmap estratégico e critérios de aceite
+
+## Ler APENAS QUANDO NECESSÁRIO
+4. `docs/DECISION_LOG.md` — Quando precisar entender "por quê" uma decisão foi tomada
+5. `docs/PRD.md` — Referência completa do sistema (só quando necessário para detalhes)
+6. Arquivo específico em `docs/archive/` — APENAS se o usuário pedir explicitamente
+
+## NUNCA LER
+- `docs/archive/*` — Blueprints arquivados (auditoria humana, não operacional)
+- `.git/` — Controle de versão
+- `__pycache__/`, `node_modules/`, `.cache/`, `dist/`, `build/` — Artefatos de build
+- Qualquer arquivo `*.resolved`, `*.bak`, `*.old`, `*.tmp`
+
+## Workflow de nova fase
+1. Ler `docs/CURRENT_STATE.md` (entender onde estamos)
+2. Ler `docs/BACKLOG_FUTURO.md` (confirmar qual fase é a próxima)
+3. Ler o blueprint da fase a implementar (o usuário fornecerá)
+4. Ler apenas os arquivos de `idea-forge/src/` que serão modificados
+5. Escrever TESTES primeiro (TDD)
+6. Implementar código
+7. Rodar testes: `pytest tests/unit/ -v` e `pytest tests/integration/ -v`
+8. Após validação pelo usuário: executar `docs/ARCHIVING_PROTOCOL.md`
+
+## Regra de log obrigatório
+Se qualquer artefato esperado não for encontrado durante a implementação (arquivo ausente,
+parsing falhou, dependência não resolvida), NUNCA usar fallback silencioso.
+SEMPRE reportar ao usuário: "Artefato [{nome}] não encontrado em [{caminho}]. Aguardando instrução."
+
+## Regra de TDD
+NUNCA escrever código de produção sem ter o teste correspondente PRIMEIRO.
+Sequência obrigatória: escrever teste → rodar (FALHA) → implementar → rodar (PASSA).
