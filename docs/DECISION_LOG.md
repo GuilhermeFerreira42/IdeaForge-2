@@ -25,3 +25,8 @@ F0 | RULE | TDD rigoroso: testes antes do código, integração progressiva | Im
 F0 | CFG | Modelo inicial de teste: gpt-oss:20b-cloud | 20B é onde o sistema v1 funciona bem; valida sem riscos de capacidade | config/settings.py
 F0 | RULE | RF-006: critério de aceite medido via fixtures com issues conhecidos | Critério "≥80% de issues capturados" precisa de mecanismo programático, não subjetivo | tests/fixtures/
 F0 | CFG | RNF-01: overhead de orquestração ≤500ms (excluindo inferência LLM) | Tempo total depende do hardware; overhead de código é o que controlamos | core/adaptive_orchestrator.py
+F0 | DEL | Removidos 4 agents PRD-specific (architect, consistency_checker, product_manager, security_reviewer) | PRD-specific, sem uso no debate-only | src/agents/
+F0 | DEL | Removidos 5 arquivos core PRD-specific + exemplars/ | NEXUS passes, extratores e validadores de PRD | src/core/
+F0 | DEL | Removida pasta planning/ (plan_generator.py) | Development Plan era PRD-specific | src/planning/
+F0 | DEL | Removidos docs/archive/ e workflow/ | Histórico v1 fica no repo antigo; workflow embutido nos docs | docs/, workflow/
+F0 | ADD | Criado tests/conftest.py com MockProvider | Base para TDD em todas as fases futuras | tests/
