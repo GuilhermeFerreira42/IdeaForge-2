@@ -19,9 +19,33 @@ Depois (otimizado)
   → 90%+ do contexto disponível para implementação
   → Resultado: implementação focada, sem distrações
 
-──────────────────────────────────
-FLUXO PADRÃO DE CADA FASE (TDD)
-══════════════════════════════════
+────────────────────────────────────────────────────────
+FLUXO PADRÃO DE CADA ONDA
+══════════════════════════
+
+ANTES DE INICIAR UMA ONDA:
+  1. Peça à IA:
+     "Com base no BACKLOG_FUTURO.md, CURRENT_STATE.md e DECISION_LOG.md,
+      proponha o CONTRATOS_DA_ONDA para a Onda N."
+
+  2. A IA irá propor todos os campos:
+     OUTPUT_SCHEMAS, ESCOPO_CONGELADO, ARQUIVOS_A_DELETAR,
+     REESCRITAS, SPECIALISTS_MVP, DECISOES_EXTRAS
+
+  3. Você revisa a proposta:
+     - O que estiver correto: confirma
+     - O que estiver errado ou incompleto: corrige e informa a IA
+     - O que a IA não tiver como saber: você acrescenta
+
+  4. IA atualiza o bloco no BACKLOG_FUTURO.md com a versão final
+
+  REGRA CHAVE: você não preenche — você valida.
+  A IA propõe com base no contexto. Você corrige com base
+  no que só você sabe. São 2 minutos de revisão, não trabalho manual.
+
+────────────────────────────────────────────────────────
+FLUXO PADRÃO DE CADA FASE (dentro de uma onda)
+══════════════════════════════════════════════
 
 PASSO 1 — VOCÊ planeja a fase e escreve o blueprint (usando Protocolo NEXUS)
 

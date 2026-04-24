@@ -36,3 +36,9 @@ SEMPRE reportar ao usuário: "Artefato [{nome}] não encontrado em [{caminho}]. 
 ## Regra de TDD
 NUNCA escrever código de produção sem ter o teste correspondente PRIMEIRO.
 Sequência obrigatória: escrever teste → rodar (FALHA) → implementar → rodar (PASSA).
+
+## Regra de Contrato
+Se o `CONTRATOS_DA_ONDA` do backlog estiver preenchido para a onda atual:
+- NUNCA questionar os contratos listados — eles são decisões já tomadas pelo usuário
+- Usar os contratos como fatos, não como sugestões
+- Perguntar apenas sobre o que está genuinamente em branco no bloco de contratos

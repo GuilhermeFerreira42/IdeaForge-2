@@ -53,6 +53,13 @@ Confirmar que a suíte de testes passa. Reportar explicitamente:
 - Alterar `Status` de `PENDENTE` para `CONCLUÍDO`
 - Se a fase concluída é a última de uma Onda, verificar se a Meta da Onda foi atingida
 - Se novas técnicas foram descobertas, adicionar como item novo na Onda apropriada
+- Após atualizar os status dos itens concluídos, verificar se a próxima
+  onda ainda não tem CONTRATOS_DA_ONDA preenchido. Se não tiver:
+  - Gerar uma proposta de CONTRATOS_DA_ONDA para a próxima onda
+    com base no BACKLOG, CURRENT_STATE e DECISION_LOG
+  - Inserir a proposta no BACKLOG_FUTURO.md com o marcador [PROPOSTA — aguardando validação do usuário]
+  - Informar o usuário ao final do arquivamento:
+    "CONTRATOS_DA_ONDA da Onda N gerado como proposta. Revise antes de disparar o NEXUS."
 
 ### 7. Limpeza do Projeto
 - Mover scripts de verificação temporários para `docs/archive/phase_XX/`

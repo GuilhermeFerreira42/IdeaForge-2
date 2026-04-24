@@ -21,6 +21,35 @@
 - **Critério binário:** `pytest tests/unit/ -v` passa com 100% nos 5 módulos acima + `pytest tests/integration/test_adaptive_rounds.py -v` passa
 - **Status:** CONCLUÍDO
 
+### CONTRATOS_DA_ONDA 1
+> Este bloco é PROPOSTO PELA IA com base no BACKLOG, CURRENT_STATE e DECISION_LOG.
+> O usuário revisa, corrige o que estiver errado e acrescenta o que a IA não tem como saber.
+> Só disparar o NEXUS após o usuário confirmar a proposta.
+> Campos marcados com [?] são lacunas que a IA não conseguiu inferir — o usuário deve preencher antes de confirmar.
+
+```yaml
+OUTPUT_SCHEMAS:
+  W1-02: ValidationBoard com 3 categorias e snapshots JSON.
+  W1-03: Regex degradável, parser stateless.
+  W1-04: Jaccard similarity entre rounds, sem LLM.
+  W1-05: OrchestratorDecision object (action, reason, category).
+
+ESCOPO_CONGELADO:
+  - agentes
+  - debate_engine.py
+
+ARQUIVOS_A_DELETAR:
+  - arquivos PRD specíficos de planning e regras PRD (Fase 0)
+
+REESCRITAS:
+  - DebateStateTracker: TOTAL
+
+SPECIALISTS_MVP:
+
+DECISOES_EXTRAS:
+  - Sem uso de chamadas LLM nas lógicas arquiteturais.
+```
+
 ---
 
 ## Onda 2 — Agentes e Debate (Fases 3-4)
@@ -36,6 +65,40 @@
 ### Meta da Onda 2
 - **Critério binário:** `pytest tests/integration/test_debate_flow.py -v` e `pytest tests/integration/test_agent_spawning.py -v` passam
 - **Status:** PENDENTE
+
+### CONTRATOS_DA_ONDA 2
+> Este bloco é PROPOSTO PELA IA com base no BACKLOG, CURRENT_STATE e DECISION_LOG.
+> O usuário revisa, corrige o que estiver errado e acrescenta o que a IA não tem como saber.
+> Só disparar o NEXUS após o usuário confirmar a proposta.
+> Campos marcados com [?] são lacunas que a IA não conseguiu inferir — o usuário deve preencher antes de confirmar.
+
+```yaml
+OUTPUT_SCHEMAS:
+  W2-01: 7 seções exatas: Problema, Solução, Público-Alvo, Premissas, Diferencial, Riscos, Constraints.
+
+ESCOPO_CONGELADO:
+  - controller.py
+  - planner.py
+
+ARQUIVOS_A_DELETAR:
+  - ProductManagerAgent
+  - ArchitectAgent
+  - SecurityReviewerAgent
+  - ConsistencyCheckerAgent
+  - PlanGenerator
+
+REESCRITAS:
+  - DebateEngine: TOTAL
+
+SPECIALISTS_MVP:
+  - Security
+  - Feasibility
+  - Scalability
+  - UX
+
+DECISOES_EXTRAS:
+  - O blueprint atual deve cobrir a Onda 2 inteira (W2-01 a W2-05).
+```
 
 ---
 
@@ -53,9 +116,33 @@
 - **Critério binário:** `pytest tests/ -v` passa (unitários + integração + smoke) e relatório gerado alimentado a Claude/Gemini produz PRD de qualidade
 - **Status:** PENDENTE
 
+### CONTRATOS_DA_ONDA 3
+> Este bloco é PROPOSTO PELA IA com base no BACKLOG, CURRENT_STATE e DECISION_LOG.
+> O usuário revisa, corrige o que estiver errado e acrescenta o que a IA não tem como saber.
+> Só disparar o NEXUS após o usuário confirmar a proposta.
+> Campos marcados com [?] são lacunas que a IA não conseguiu inferir — o usuário deve preencher antes de confirmar.
+
+```yaml
+OUTPUT_SCHEMAS:
+
+ESCOPO_CONGELADO:
+
+ARQUIVOS_A_DELETAR:
+
+REESCRITAS:
+
+SPECIALISTS_MVP:
+
+DECISOES_EXTRAS:
+
+```
+
 ---
 
 ## Regras do Backlog
 1. Itens movem de `PENDENTE` para `CONCLUÍDO` apenas após validação com critério binário
 2. Nenhuma Onda inicia sem a anterior concluída
 3. Novas técnicas descobertas durante implementação são adicionadas como item novo na Onda apropriada
+4. `CONTRATOS_DA_ONDA` deve estar confirmado pelo usuário antes de disparar o NEXUS — nunca durante
+5. A IA propõe o `CONTRATOS_DA_ONDA` — o usuário valida. Campos marcados com [?] exigem resposta do usuário antes da confirmação
+6. Campos que o usuário confirmar sem alteração são tratados pelo NEXUS como fatos — não serão questionados
