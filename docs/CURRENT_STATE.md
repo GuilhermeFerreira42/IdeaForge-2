@@ -1,5 +1,5 @@
 # CURRENT_STATE — IdeaForge 2
-> Última atualização: Fase 0 (Concluída) | 23/04/2026
+> Última atualização: Fase 1 (Concluída - Fundação + Orquestrador) | 24/04/2026
 
 ## Arquitetura Ativa
 - **Padrão:** Blackboard + Orquestrador Adaptativo (regras programáticas, zero LLM)
@@ -11,12 +11,12 @@
 | Módulo | Arquivo | Contrato Público | Desde |
 |---|---|---|---|
 | DebateEngine | `debate/debate_engine.py` | `run_debate(idea, context) → transcript` | v1 (refatorar) |
-| DebateStateTracker | `debate/debate_state_tracker.py` | `extract_issues(text) → List[IssueRecord]` | v1 (expandir) |
+| DebateStateTracker | `debate/debate_state_tracker.py` | `extract_issues(text) → List[str]` | v2 [NOVO] |
 | ProponentAgent | `agents/proponent_agent.py` | `expand(idea) → proposta` / `defend(issues, critique) → defesa` | v1 (adicionar modo) |
 | CriticAgent | `agents/critic_agent.py` | `review(artifact, context) → crítica` | v1 (simplificar) |
 | SynthesizerAgent | `agents/synthesizer_agent.py` | `synthesize(board, idea, stats) → relatório` | v2 [NOVO] |
 | AdaptiveOrchestrator | `core/adaptive_orchestrator.py` | `evaluate(tracker) → CONTINUE/STOP/SPAWN` | v2 [NOVO] |
-| ValidationBoard | `core/validation_board.py` | `update(text) → {issues, decisions, assumptions}` | v2 [NOVO] |
+| ValidationBoard | `core/validation_board.py` | `add_*, get_*_prompt(), snapshot(), persist()` | v2 [NOVO] |
 | ConvergenceDetector | `core/convergence_detector.py` | `is_converged(tracker, rounds) → bool` | v2 [NOVO] |
 | ReportGenerator | `core/report_generator.py` | `generate(board, idea, transcript) → markdown` | v2 [NOVO] |
 | Blackboard | `core/blackboard.py` | `get/set(key, value)` | v1 (mantido) |

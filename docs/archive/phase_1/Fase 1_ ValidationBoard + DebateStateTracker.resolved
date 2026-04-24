@@ -1,0 +1,1200 @@
+# Blueprint — Fase 1: ValidationBoard + DebateStateTracker
+**IdeaForge 2 | Onda 1 | W1-02 + W1-03**
+`docs/archive/phase_01_validation_board_tracker.resolved` *(mover após validação)*
+
+---
+
+## PARTE 1 — VISÃO DA FASE
+
+### 1.1 Identidade
+
+| Campo | Valor |
+|---|---|
+| Codinome | **FORGE-FOUNDATION** |
+| Fase | 1 de 5 (Onda 1) |
+| Items do Backlog | W1-02 + W1-03 |
+| Declaração de visão | Construir a fundação de dados do debate: receber texto bruto de agentes, parsear issues/decisões/pressupostos e persistir estado estruturado e auditável em disco. |
+
+### 1.2 Problema e Solução
+
+| Problema | Impacto | Como Esta Fase Resolve |
+|---|---|---|
+| `DebateStateTracker` atual mistura parsing de texto com gerenciamento de estado | Acoplamento impede testar parsing isolado; mudança em regex quebra rastreamento | Separar em duas classes: Tracker (parser puro) e Board (estado mestre) |
+| Não há rastreamento de Decisões nem Pressupostos — só Issues | Debate perde contexto crítico; rounds repetem decisões já tomadas | `ValidationBoard` registra 3 tipos de registro com máquina de estados explícita |
+| Parser só tem 2 níveis (tabela + bullets) — texto livre (modelos < 3B) gera perda silenciosa | Issues invisíveis ao sistema, convergência falsa | Parser nível 3 (heurística por keywords categorizadas) com degradação graciosa |
+| Estado do debate não persiste em disco | Impossível depurar debates longos; falha do processo apaga tudo | `ValidationBoard.persist()` → `.forge/validation_board.json` via `snapshot()`/`from_snapshot()` |
+| `debate_engine.py` v1 extrai decisões internamente | Lógica de parsing espalhada; Board da Onda 2 não consegue reaproveitar | Toda extração migra para `DebateStateTracker` na Fase 1 |
+
+### 1.3 Público-Alvo (desta fase)
+
+| Segmento | Perfil | Prioridade |
+|---|---|---|
+| DebateEngine (Onda 2) | Consumidor principal do Board; precisa de API estável para `add_issue`, `add_decision`, `add_assumption` antes de ser reescrito | P0 |
+| AdaptiveOrchestrator (Fase 2) | Consulta `board.get_open_issues()` e `board.has_blocking_issues()` para decidir CONTINUE/STOP/SPAWN | P0 |
+| SynthesizerAgent (Onda 3) | Lê `board.get_consolidation_summary()` para gerar relatório final | P1 |
+| Desenvolvedor humano depurando debate | Inspeciona `.forge/validation_board.json` manualmente para entender estado do debate | P1 |
+
+### 1.4 Princípios Arquiteturais
+
+| Princípio | Descrição Concreta | Implicação Técnica |
+|---|---|---|
+| **Board é Mestre, Tracker é Parser** | `ValidationBoard` é a única fonte de verdade do estado. `DebateStateTracker` nunca armazena estado — apenas transforma texto em records e chama Board. | `DebateStateTracker` não tem atributo `self.issues`; toda escrita é via `board.add_*()` |
+| **Zero LLM no fluxo de estado** | Toda classificação de issues, categorização e detecção de estado usa regex + keywords. Nenhuma chamada a `ModelProvider`. | `DebateStateTracker` importa apenas `re`, `dataclasses`, `typing`. Proibido importar `model_provider`. |
+| **Degradação graciosa obrigatória** | Se parser nível 1 falhar → tenta nível 2. Se nível 2 falhar → tenta nível 3. Se nível 3 falhar → retorna lista vazia e continua. Nunca levanta exceção para o chamador. | `extract_issues_from_critique()` tem `try/except` envolvendo cada nível; retorna `[]` em último caso |
+| **Transições de estado explícitas** | Cada registro tem máquina de estados documentada. Transição inválida levanta `InvalidStateTransitionError`. | `ValidationBoard` valida transição antes de aplicar; tabela de transições válidas é constante imutável |
+| **Persistência idempotente** | `persist()` chamado N vezes com mesmo estado produz mesmo arquivo JSON. `from_snapshot()` seguido de `snapshot()` é identidade. | JSON serializado com `sort_keys=True`; fingerprint SHA-256 do conteúdo valida integridade |
+| **IDs são rastreáveis por tipo** | `ISS-XX` para Issues, `D-XX` para Decisões, `P-XX` para Pressupostos. IDs são sequenciais por tipo e nunca reutilizados. | Cada tipo tem contador independente em Board; `_next_id` por tipo persiste no snapshot |
+
+### 1.5 Diferenciais desta Fase vs Estado Anterior
+
+| Abordagem Anterior (v1) | Problema | Como Esta Fase Supera |
+|---|---|---|
+| `DebateStateTracker` armazena `self.issues: Dict` | Parser e estado acoplados; impossível testar separadamente | Board é o único storage; Tracker é stateless entre chamadas |
+| Extração de decisões em `debate_engine._extract_decisions_from_transcript()` | Lógica de parsing no motor de debate; não reutilizável | `DebateStateTracker.extract_decisions_from_text()` chamável por qualquer componente |
+| Pressupostos não existem no código | Round 0 não registra premissas; Synthesizer não sabe o que foi testado | `AssumptionRecord` com ciclo UNTESTED→VALIDATED/FLAGGED implementado desde esta fase |
+| Sem persistência do estado de debate | Falha do processo = perda total do estado | `board.persist()` grava JSON após cada round; `from_snapshot()` retoma de onde parou |
+
+---
+
+## PARTE 2 — ARQUITETURA DE COMPONENTES
+
+### 2.1 ValidationBoard
+
+**Ficha Técnica**
+
+| Atributo | Valor |
+|---|---|
+| ID interno | `validation_board` |
+| Arquivo | `idea-forge/src/core/validation_board.py` |
+| Classe Base | Nenhuma |
+| Dependências | `dataclasses`, `typing`, `hashlib`, `json`, `os`, `datetime`, `re` |
+| Modo de Operação | Síncrono, **stateful** — único dono do estado do debate |
+| Permissões | Leitura: qualquer componente. Escrita: **apenas via métodos públicos** — proibido acesso direto a `self._issues` |
+
+**Responsabilidade**
+
+Receber `IssueRecord`, `DecisionRecord` e `AssumptionRecord` de qualquer componente, aplicar transições de estado validadas, rejeitar transições inválidas com exceção tipada, responder a queries de estado, e serializar/deserializar estado completo para disco.
+
+**Data Models (Records)**
+
+```python
+from dataclasses import dataclass, field
+from typing import Optional
+
+@dataclass
+class IssueRecord:
+    issue_id: str          # "ISS-01"
+    severity: str          # "HIGH" | "MED" | "LOW"
+    category: str          # "SECURITY" | "CORRECTNESS" | "COMPLETENESS" | "CONSISTENCY" | "FEASIBILITY" | "SCALABILITY"
+    description: str       # máx 200 chars
+    status: str = "OPEN"   # "OPEN" → "RESOLVED" | "DEFERRED"
+    round_raised: int = 0
+    round_resolved: Optional[int] = None
+    resolution: str = ""
+
+@dataclass
+class DecisionRecord:
+    decision_id: str       # "D-01"
+    description: str       # máx 200 chars
+    status: str = "PROPOSED"  # "PROPOSED" → "VALIDATED" | "CONTESTED"
+    round_raised: int = 0
+    round_resolved: Optional[int] = None
+    evidence: str = ""
+
+@dataclass
+class AssumptionRecord:
+    assumption_id: str     # "P-01"
+    description: str       # máx 200 chars
+    status: str = "UNTESTED"  # "UNTESTED" → "VALIDATED" | "FLAGGED"
+    round_raised: int = 0
+    round_resolved: Optional[int] = None
+    evidence: str = ""
+```
+
+**Máquinas de Estado**
+
+```
+IssueRecord:
+  OPEN → RESOLVED  (via resolve_issue)
+  OPEN → DEFERRED  (via defer_issue)
+  [RESOLVED, DEFERRED] → qualquer = InvalidStateTransitionError
+
+DecisionRecord:
+  PROPOSED → VALIDATED  (via validate_decision)
+  PROPOSED → CONTESTED  (via contest_decision)
+  [VALIDATED, CONTESTED] → qualquer = InvalidStateTransitionError
+
+AssumptionRecord:
+  UNTESTED → VALIDATED  (via validate_assumption)
+  UNTESTED → FLAGGED    (via flag_assumption)
+  [VALIDATED, FLAGGED] → qualquer = InvalidStateTransitionError
+```
+
+**Inputs Detalhados**
+
+| Método | Parâmetros | Tipo | Descrição |
+|---|---|---|---|
+| `add_issue` | `record` | `IssueRecord` | Registra novo issue; ignora se `issue_id` já existe |
+| `resolve_issue` | `issue_id: str, round_num: int, resolution: str` | primitivos | Transição OPEN→RESOLVED |
+| `defer_issue` | `issue_id: str, round_num: int` | primitivos | Transição OPEN→DEFERRED |
+| `add_decision` | `record` | `DecisionRecord` | Registra nova decisão |
+| `validate_decision` | `decision_id: str, round_num: int, evidence: str` | primitivos | Transição PROPOSED→VALIDATED |
+| `contest_decision` | `decision_id: str, round_num: int` | primitivos | Transição PROPOSED→CONTESTED |
+| `add_assumption` | `record` | `AssumptionRecord` | Registra novo pressuposto |
+| `validate_assumption` | `assumption_id: str, round_num: int, evidence: str` | primitivos | Transição UNTESTED→VALIDATED |
+| `flag_assumption` | `assumption_id: str, round_num: int` | primitivos | Transição UNTESTED→FLAGGED |
+
+**Output — `snapshot()` completo e funcional**
+
+```json
+{
+  "_meta": {
+    "version": "1.0",
+    "created_at": "2026-04-23T16:50:14",
+    "fingerprint": "a3f8c2d1e5b9",
+    "next_ids": {"issue": 3, "decision": 2, "assumption": 4}
+  },
+  "issues": {
+    "ISS-01": {
+      "issue_id": "ISS-01",
+      "severity": "HIGH",
+      "category": "SECURITY",
+      "description": "Endpoint /api/generate não valida tamanho do payload",
+      "status": "RESOLVED",
+      "round_raised": 1,
+      "round_resolved": 2,
+      "resolution": "ID ISS-01 mencionado nos Pontos Aceitos do Proponente"
+    },
+    "ISS-02": {
+      "issue_id": "ISS-02",
+      "severity": "MED",
+      "category": "COMPLETENESS",
+      "description": "Falta definir formato de export do relatório final",
+      "status": "OPEN",
+      "round_raised": 1,
+      "round_resolved": null,
+      "resolution": ""
+    }
+  },
+  "decisions": {
+    "D-01": {
+      "decision_id": "D-01",
+      "description": "Usar Jaccard similarity com stopwords PT para detecção de convergência",
+      "status": "VALIDATED",
+      "round_raised": 1,
+      "round_resolved": 2,
+      "evidence": "Ambos os agentes concordaram na rodada 2"
+    }
+  },
+  "assumptions": {
+    "P-01": {
+      "assumption_id": "P-01",
+      "description": "Usuários preferem CLI a interface web",
+      "status": "FLAGGED",
+      "round_raised": 0,
+      "round_resolved": 1,
+      "evidence": "Critic questiona ausência de evidência de pesquisa com usuários"
+    },
+    "P-02": {
+      "assumption_id": "P-02",
+      "description": "Ollama local é suficiente para modelos até 20B",
+      "status": "UNTESTED",
+      "round_raised": 0,
+      "round_resolved": null,
+      "evidence": ""
+    }
+  }
+}
+```
+
+**Queries Públicas**
+
+| Método | Retorno | Descrição |
+|---|---|---|
+| `get_open_issues()` | `List[IssueRecord]` | Issues com status OPEN, ordenados HIGH→MED→LOW |
+| `get_validated_decisions()` | `List[DecisionRecord]` | Decisões com status VALIDATED |
+| `get_untested_assumptions()` | `List[AssumptionRecord]` | Pressupostos com status UNTESTED |
+| `has_blocking_issues()` | `bool` | `True` se qualquer issue HIGH com status OPEN |
+| `get_stats()` | `Dict` | Contagens por tipo e status |
+| `get_issues_for_proponent_prompt()` | `str` | Texto formatado para injetar no prompt do Proponent |
+| `get_open_issues_for_critic_prompt()` | `str` | Texto formatado para injetar no prompt do Critic |
+| `get_validated_decisions_prompt()` | `str` | Texto formatado com decisões que NÃO devem ser revisitadas |
+| `get_consolidation_summary()` | `str` | Markdown completo para o SynthesizerAgent |
+| `snapshot()` | `Dict` | Estado completo serializável |
+| `persist(path)` | `None` | Grava `snapshot()` em disco como JSON |
+| `from_snapshot(data)` | `ValidationBoard` | Classmethod — reconstrói Board de snapshot |
+
+**Budget de Recursos**
+
+| Operação | Custo Esperado | Limite |
+|---|---|---|
+| `add_issue` / `add_decision` / `add_assumption` | O(1) dict lookup | < 1ms |
+| `get_open_issues()` com ordenação | O(n log n) | < 5ms para n ≤ 100 issues |
+| `persist()` — serialização JSON | O(n) | < 50ms para estado com 50 records |
+| `get_consolidation_summary()` | O(n) — string building | Output ≤ 2500 chars (invariante global) |
+| `get_*_prompt()` — todos os métodos | O(n) | Output ≤ 1000 chars cada |
+
+---
+
+### 2.2 DebateStateTracker (refatorado)
+
+**Ficha Técnica**
+
+| Atributo | Valor |
+|---|---|
+| ID interno | `debate_state_tracker` |
+| Arquivo | `idea-forge/src/debate/debate_state_tracker.py` |
+| Classe Base | Nenhuma |
+| Dependências | `re`, `typing`, `ValidationBoard`, `IssueRecord`, `DecisionRecord`, `AssumptionRecord` |
+| Modo de Operação | Síncrono, **stateless entre chamadas** — não armazena issues, apenas parseia e delega ao Board |
+| Permissões | Leitura: texto bruto de agentes. Escrita: **somente via Board** — proibido manter estado próprio de issues/decisões |
+
+**Responsabilidade**
+
+Receber texto bruto de resposta de agente (string), aplicar pipeline de 3 níveis de parsing para extrair `IssueRecord`, `DecisionRecord` e `AssumptionRecord`, deduplicar por descrição normalizada, e chamar os métodos correspondentes no `ValidationBoard` injetado.
+
+**Inputs Detalhados**
+
+| Método | Parâmetros | Tipo | Origem |
+|---|---|---|---|
+| `extract_issues_from_critique` | `critique_text: str, round_num: int, board: ValidationBoard` | mixed | Saída bruta do CriticAgent |
+| `extract_resolutions_from_defense` | `defense_text: str, round_num: int, board: ValidationBoard` | mixed | Saída bruta do ProponentAgent |
+| `extract_decisions_from_text` | `text: str, round_num: int, board: ValidationBoard` | mixed | Qualquer texto de agente |
+| `register_assumptions_from_text` | `text: str, round_num: int, board: ValidationBoard` | mixed | Proposta expandida do Round 0 |
+
+**Pipeline de 3 Níveis de Parsing**
+
+```
+NÍVEL 1 — Tabela Markdown (6 ou 4 colunas):
+  Regex: r'\|\s*(ISS-\d+)\s*\|\s*(HIGH|MED|LOW)\s*\|\s*(\w+)\s*\|\s*([^|]+)\|'
+  Captura: issue_id, severity, category, description
+  Critério de sucesso: ≥ 1 match encontrado
+
+NÍVEL 2 — Bullets com severidade:
+  Regex: r'-\s*\[(HIGH|MED|LOW)\]\s*(.+?)(?:\r?\n|$)'
+  Fallback: r'-\s*(HIGH|MED|LOW)\s*[:\-]\s*(.+?)(?:\r?\n|$)'
+  Captura: severity, description (auto-ID gerado, categoria inferida)
+
+NÍVEL 3 — Heurística por keywords (NOVO):
+  Para cada frase no texto (split por '. ' e '\n'):
+    1. Normalizar: lowercase, remover stopwords PT
+    2. Verificar presença de keyword de severidade ("crítico"→HIGH, "importante"→MED, "menor"→LOW)
+    3. Verificar presença de keyword de categoria (tabela abaixo)
+    4. Se ambas encontradas: criar IssueRecord com auto-ID
+  Critério de sucesso: ≥ 1 issue extraído
+  Critério de falha graciosa: retornar [] sem exception
+
+FALLBACK FINAL: retornar [] — debate continua sem rastreamento desta rodada
+```
+
+**Tabela de Keywords por Categoria (Nível 3)**
+
+| Categoria | Keywords PT | Keywords EN |
+|---|---|---|
+| `SECURITY` | segurança, vulnerabilidade, autenticação, exposição, credencial | security, auth, vulnerability, exposed |
+| `CORRECTNESS` | erro, incorreto, bug, contradição, falso, errado | error, incorrect, wrong, contradiction |
+| `COMPLETENESS` | falta, ausente, incompleto, lacuna, indefinido | missing, incomplete, gap, undefined |
+| `CONSISTENCY` | inconsistente, conflito, diverge, contradiz | inconsistent, conflict, diverges |
+| `FEASIBILITY` | inviável, irrealista, impossível, custo elevado | infeasible, unrealistic, impossible |
+| `SCALABILITY` | escala, gargalo, bottleneck, performance, throughput | scale, bottleneck, performance |
+
+**Keywords de Severidade (Nível 3)**
+
+| Severidade | Keywords PT | Keywords EN |
+|---|---|---|
+| `HIGH` | crítico, grave, bloqueante, sério, urgente | critical, blocking, severe, urgent |
+| `MED` | importante, relevante, moderado, significativo | important, moderate, significant |
+| `LOW` | menor, cosmético, sugestão, trivial, opcional | minor, cosmetic, suggestion, trivial |
+
+**Output — retorno de `extract_issues_from_critique`**
+
+```python
+# Retorno: List[str] — IDs dos issues registrados com sucesso no Board
+["ISS-01", "ISS-02"]
+
+# Se nenhum issue encontrado:
+[]
+
+# Se Board rejeitar duplicata (ID já existe):
+# issue não é adicionado à lista; sem exceção levantada
+```
+
+**Deduplicação**
+
+```python
+# Normalização de texto para dedup:
+def _normalize_text(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r'[^\w\s]', '', text)      # remove pontuação
+    text = re.sub(r'\s+', ' ', text)          # colapsa espaços
+    words = text.split()
+    words = [w for w in words if w not in STOPWORDS_PT]
+    return ' '.join(words)
+
+# Dedup: Board verifica se descrição normalizada já existe antes de add_issue()
+# Prefixo de 40 chars normalizado como chave de dedup
+```
+
+---
+
+## PARTE 3 — FLUXO DE COMUNICAÇÃO E CONTRATOS
+
+### 3.1 Diagrama de Sequência — Fluxo Principal de um Round
+
+```mermaid
+sequenceDiagram
+    participant DE as DebateEngine
+    participant CA as CriticAgent
+    participant PA as ProponentAgent
+    participant DST as DebateStateTracker
+    participant VB as ValidationBoard
+    participant DISK as .forge/validation_board.json
+
+    DE->>CA: review_artifact(artifact, context)
+    CA-->>DE: critique_text (string bruta)
+
+    DE->>DST: extract_issues_from_critique(critique_text, round_num, board)
+    DST->>DST: _parse_level1(critique_text) → IssueRecords
+    alt Nível 1 falhou (0 matches)
+        DST->>DST: _parse_level2(critique_text) → IssueRecords
+        alt Nível 2 falhou
+            DST->>DST: _parse_level3(critique_text) → IssueRecords
+        end
+    end
+    DST->>DST: _deduplicate(records, board)
+    loop Para cada IssueRecord novo
+        DST->>VB: add_issue(record)
+        VB->>VB: _validate_no_duplicate(record)
+        VB-->>DST: ok
+    end
+    DST-->>DE: ["ISS-01", "ISS-02"] (IDs registrados)
+
+    DE->>DST: extract_decisions_from_text(critique_text, round_num, board)
+    DST->>VB: add_decision(DecisionRecord)
+    VB-->>DST: ok
+    DST-->>DE: ["D-01"]
+
+    DE->>PA: defend_artifact(artifact, critique, context)
+    PA-->>DE: defense_text (string bruta)
+
+    DE->>DST: extract_resolutions_from_defense(defense_text, round_num, board)
+    DST->>DST: _extract_accepted_block(defense_text)
+    loop Para cada issue OPEN no Board
+        DST->>DST: _match_resolution(issue, accepted_block)
+        alt Match encontrado
+            DST->>VB: resolve_issue(issue_id, round_num, resolution)
+            VB->>VB: _validate_transition(OPEN → RESOLVED)
+            VB-->>DST: ok
+        end
+    end
+    DST-->>DE: ["ISS-01"] (IDs resolvidos)
+
+    DE->>VB: persist(".forge/validation_board.json")
+    VB->>VB: snapshot()
+    VB->>DISK: json.dump(snapshot, sort_keys=True)
+    DISK-->>VB: ok
+    VB-->>DE: None
+```
+
+### 3.2 Diagrama de Estado — ValidationBoard (IssueRecord)
+
+```mermaid
+stateDiagram-v2
+    [*] --> OPEN : add_issue(IssueRecord)
+
+    OPEN --> RESOLVED : resolve_issue(issue_id, round_num, resolution)\n[resolution != ""]
+    OPEN --> DEFERRED : defer_issue(issue_id, round_num)
+
+    RESOLVED --> [*] : estado terminal (sucesso)
+    DEFERRED --> [*] : estado terminal (postergado)
+
+    OPEN --> ERROR_DUPLICATE : add_issue com mesmo ID\n→ ignorado silenciosamente
+    RESOLVED --> InvalidStateTransitionError : qualquer transição\n→ exceção levantada
+    DEFERRED --> InvalidStateTransitionError : qualquer transição\n→ exceção levantada
+```
+
+### 3.3 Diagrama de Estado — ValidationBoard (DecisionRecord)
+
+```mermaid
+stateDiagram-v2
+    [*] --> PROPOSED : add_decision(DecisionRecord)
+
+    PROPOSED --> VALIDATED : validate_decision(decision_id, round_num, evidence)\n[evidence != ""]
+    PROPOSED --> CONTESTED : contest_decision(decision_id, round_num)
+
+    VALIDATED --> [*] : estado terminal (consenso)
+    CONTESTED --> [*] : estado terminal (sem consenso)
+
+    VALIDATED --> InvalidStateTransitionError : qualquer transição
+    CONTESTED --> InvalidStateTransitionError : qualquer transição
+```
+
+### 3.4 Diagrama de Estado — ValidationBoard (AssumptionRecord)
+
+```mermaid
+stateDiagram-v2
+    [*] --> UNTESTED : add_assumption(AssumptionRecord)\n[via register_assumptions_from_text]
+
+    UNTESTED --> VALIDATED : validate_assumption(assumption_id, round_num, evidence)
+    UNTESTED --> FLAGGED : flag_assumption(assumption_id, round_num)
+
+    VALIDATED --> [*] : estado terminal (confirmado)
+    FLAGGED --> [*] : estado terminal (risco identificado)
+
+    VALIDATED --> InvalidStateTransitionError : qualquer transição
+    FLAGGED --> InvalidStateTransitionError : qualquer transição
+```
+
+### 3.5 Tabela de Transições de Estado
+
+| Tipo | Estado Atual | Evento | Estado Novo | Condição | Ação |
+|---|---|---|---|---|---|
+| Issue | OPEN | `resolve_issue` | RESOLVED | `resolution != ""` | Setar `round_resolved`, `resolution` |
+| Issue | OPEN | `defer_issue` | DEFERRED | sempre | Setar `round_resolved` |
+| Issue | OPEN | `add_issue` (mesmo ID) | OPEN | ID já existe | Ignorar silenciosamente |
+| Issue | RESOLVED | qualquer | — | — | Levantar `InvalidStateTransitionError` |
+| Issue | DEFERRED | qualquer | — | — | Levantar `InvalidStateTransitionError` |
+| Decision | PROPOSED | `validate_decision` | VALIDATED | `evidence != ""` | Setar `round_resolved`, `evidence` |
+| Decision | PROPOSED | `contest_decision` | CONTESTED | sempre | Setar `round_resolved` |
+| Decision | VALIDATED | qualquer | — | — | Levantar `InvalidStateTransitionError` |
+| Decision | CONTESTED | qualquer | — | — | Levantar `InvalidStateTransitionError` |
+| Assumption | UNTESTED | `validate_assumption` | VALIDATED | `evidence != ""` | Setar `round_resolved`, `evidence` |
+| Assumption | UNTESTED | `flag_assumption` | FLAGGED | sempre | Setar `round_resolved` |
+| Assumption | VALIDATED | qualquer | — | — | Levantar `InvalidStateTransitionError` |
+| Assumption | FLAGGED | qualquer | — | — | Levantar `InvalidStateTransitionError` |
+
+### 3.6 Contrato de Erro
+
+```python
+class InvalidStateTransitionError(Exception):
+    """
+    Levantada quando ValidationBoard recebe transição de estado inválida.
+    
+    Atributos:
+        record_id: str   — ID do registro (ex: "ISS-01")
+        current:   str   — estado atual (ex: "RESOLVED")
+        attempted: str   — transição tentada (ex: "resolve_issue")
+    """
+    def __init__(self, record_id: str, current: str, attempted: str):
+        self.record_id = record_id
+        self.current = current
+        self.attempted = attempted
+        super().__init__(
+            f"[{record_id}] Transição inválida: '{attempted}' "
+            f"a partir do estado '{current}'"
+        )
+```
+
+---
+
+## PARTE 4 — INFRAESTRUTURA E INTEGRAÇÃO
+
+### 4.1 Diagrama de Infraestrutura (Fase 1)
+
+```mermaid
+flowchart TD
+    subgraph PROCESSO["Processo Python (CLI)"]
+        DST["DebateStateTracker\n(parser stateless)"]
+        VB["ValidationBoard\n(estado mestre)"]
+        DST -->|"add_issue / add_decision\nadd_assumption"| VB
+        DST -->|"resolve_issue\ndefer_issue"| VB
+    end
+
+    subgraph DISCO[".forge/ (disco local)"]
+        JSON["validation_board.json\n(snapshot JSON)"]
+    end
+
+    VB -->|"persist(path)"| JSON
+    JSON -->|"from_snapshot(data)"| VB
+
+    subgraph TESTS["tests/ (pytest)"]
+        UNIT["tests/unit/\ntest_validation_board.py\ntest_debate_state_tracker.py\ntest_parser_levels.py"]
+        INT["tests/integration/\ntest_adaptive_rounds.py (parcial)"]
+        MOCK["tests/conftest.py\nMockProvider"]
+    end
+
+    UNIT -->|"importa diretamente"| VB
+    UNIT -->|"importa diretamente"| DST
+    MOCK -.->|"não usado nesta fase\n(sem LLM)"| DST
+```
+
+### 4.2 Requisitos de Ambiente
+
+| Perfil | Especificações | Notas |
+|---|---|---|
+| Mínimo (desenvolvimento) | Python 3.10+, pytest 7.0+, 50MB disco livre | Sem Ollama necessário — fase 100% programática |
+| CI/CD | Python 3.10+, pytest 7.0+, sem GPU | Todos os testes unitários rodam em < 5s totais |
+| Desenvolvimento no Windows | Python 3.10+, `python-dotenv` para `.env` | Path `.forge/` criado via `os.makedirs(exist_ok=True)` |
+
+### 4.3 Dependências Externas
+
+**Nenhuma dependência externa nova** nesta fase. Apenas stdlib Python:
+
+| Pacote | Tipo | Uso |
+|---|---|---|
+| `re` | stdlib | Parser de 3 níveis (regex) |
+| `json` | stdlib | Serialização do snapshot |
+| `os` | stdlib | Criação de diretórios, paths |
+| `datetime` | stdlib | Timestamps nos records |
+| `dataclasses` | stdlib | `IssueRecord`, `DecisionRecord`, `AssumptionRecord` |
+| `hashlib` | stdlib | Fingerprint SHA-256 do snapshot |
+| `pytest` | dev dependency (já no projeto) | Framework TDD |
+
+### 4.4 Configuração — `.forge/` e Paths
+
+```python
+# Valores default — não requerem .env nesta fase
+VALIDATION_BOARD_PATH = ".forge/validation_board.json"
+VALIDATION_BOARD_DIR  = ".forge/"
+
+# Criação automática no __init__ do ValidationBoard:
+# os.makedirs(VALIDATION_BOARD_DIR, exist_ok=True)
+```
+
+### 4.5 Segurança
+
+| Ameaça | Mitigação |
+|---|---|
+| Texto malicioso de LLM com regex injection | Todos os inputs passam por `re.escape()` antes de uso em patterns dinâmicos |
+| JSON corrompido no disco | `from_snapshot()` tem `try/except json.JSONDecodeError` → retorna Board vazio e loga warning |
+| Transição de estado inválida silenciosa | `InvalidStateTransitionError` levantada imediatamente — nunca silenciada |
+| Acesso direto a `_issues` bypassando validação | Atributos privados com prefixo `_`; documentado como invariante proibida |
+
+---
+
+## PARTE 5 — RECUPERAÇÃO DE ERROS E RESILIÊNCIA
+
+### 5.1 Classificação de Erros
+
+| Nível | Tipo | Exemplos Concretos | Ação Automática | Timeout | Máx Tentativas |
+|---|---|---|---|---|---|
+| FATAL | `InvalidStateTransitionError` | `resolve_issue("ISS-01")` quando ISS-01 já está RESOLVED | Propagar exceção — parar execução | N/A | 0 |
+| PARSING_FAIL_L1 | Regex nível 1 sem match | Critic responde em prosa pura sem tabela | Tentar nível 2 | N/A | 1 |
+| PARSING_FAIL_L2 | Regex nível 2 sem match | Texto sem bullets com severidade | Tentar nível 3 | N/A | 1 |
+| PARSING_FAIL_L3 | Heurística sem match | Texto vazio ou sem keywords conhecidas | Retornar `[]`, debate continua | N/A | 0 |
+| PERSIST_FAIL | `OSError` ao gravar JSON | Disco cheio, permissão negada | Log via `pipeline_logger`, continua sem persistir | N/A | 1 |
+| LOAD_FAIL | `json.JSONDecodeError` | Arquivo corrompido | Retornar Board vazio, logar warning | N/A | 0 |
+| DUPLICATE_ID | ID já existe no Board | Parser re-extrai ISS-01 em round seguinte | Ignorar silenciosamente (sem exceção) | N/A | 0 |
+
+### 5.2 Fluxo de Self-Healing — Parser
+
+```mermaid
+flowchart TD
+    A["critique_text recebido"] --> B["Tentar Nível 1: regex tabela"]
+    B --> C{">= 1 match?"}
+    C -->|Sim| D["Registrar issues no Board"]
+    C -->|Não| E["Tentar Nível 2: regex bullets"]
+    E --> F{">= 1 match?"}
+    F -->|Sim| D
+    F -->|Não| G["Tentar Nível 3: heurística keywords"]
+    G --> H{">= 1 issue?"}
+    H -->|Sim| D
+    H -->|Não| I["Retornar [] — log info: 'Parser sem issues neste round'"]
+    D --> J["Deduplicar vs Board existente"]
+    J --> K["Chamar board.add_issue() para cada novo"]
+    K --> L["Retornar List[str] com IDs registrados"]
+    I --> M["Debate continua normalmente"]
+```
+
+### 5.3 Fluxo de Self-Healing — Persistência
+
+```mermaid
+flowchart TD
+    A["board.persist(path) chamado"] --> B["os.makedirs(dir, exist_ok=True)"]
+    B --> C{OSError?}
+    C -->|Sim| D["Log: 'Falha ao criar diretório {dir}'"]
+    D --> E["Retornar sem persistir — estado em memória preservado"]
+    C -->|Não| F["json.dump(snapshot(), sort_keys=True)"]
+    F --> G{OSError ao gravar?}
+    G -->|Sim| H["Log: 'Falha ao persistir Board em {path}'"]
+    H --> E
+    G -->|Não| I["Verificar fingerprint SHA-256 do arquivo gravado"]
+    I --> J{Fingerprint bate?}
+    J -->|Sim| K["Retornar None — sucesso"]
+    J -->|Não| L["Log warning: 'Fingerprint mismatch — arquivo pode estar corrompido'"]
+    L --> K
+```
+
+### 5.4 Tabela Resumo de Resiliência
+
+| Cenário | Detecção | Recovery Automático | Tempo Máximo | Intervenção Humana |
+|---|---|---|---|---|
+| Parser falha todos os 3 níveis | `len(result) == 0` | Retorna `[]`, debate continua | < 10ms | Não |
+| Transição de estado inválida | `InvalidStateTransitionError` | Nenhum — propaga para chamador | Imediato | Sim — corrigir lógica |
+| Falha ao persistir JSON | `OSError` capturado | Log + continua sem persistir | < 5ms | Não (mas debate pode perder estado se processo morrer) |
+| JSON corrompido ao carregar | `JSONDecodeError` | Retorna Board vazio, log warning | < 5ms | Sim — verificar `.forge/` |
+| ID duplicado no Board | `issue_id in self._issues` | Ignorar silenciosamente | < 1ms | Não |
+
+---
+
+## PARTE 6 — REQUISITOS FUNCIONAIS E NÃO-FUNCIONAIS
+
+### 6.1 Requisitos Funcionais
+
+| ID | Requisito | Critério de Aceite (verificável) | Prioridade | Complexidade |
+|---|---|---|---|---|
+| RF-F1-01 | `ValidationBoard.add_issue()` registra `IssueRecord` com status inicial OPEN | `board.add_issue(record); assert board.get_open_issues()[0].issue_id == record.issue_id` | Must | Baixa |
+| RF-F1-02 | `resolve_issue()` transiciona Issue de OPEN para RESOLVED | `board.resolve_issue("ISS-01", 2, "aceito"); assert board._issues["ISS-01"].status == "RESOLVED"` | Must | Baixa |
+| RF-F1-03 | `resolve_issue()` em Issue já RESOLVED levanta `InvalidStateTransitionError` | `with pytest.raises(InvalidStateTransitionError): board.resolve_issue("ISS-01", 3, "x")` | Must | Baixa |
+| RF-F1-04 | `ValidationBoard.add_decision()` registra `DecisionRecord` com status PROPOSED | `board.add_decision(d); assert d.decision_id in board._decisions` | Must | Baixa |
+| RF-F1-05 | `validate_decision()` transiciona Decision de PROPOSED para VALIDATED | `board.validate_decision("D-01", 2, "evidência"); assert board._decisions["D-01"].status == "VALIDATED"` | Must | Baixa |
+| RF-F1-06 | `ValidationBoard.add_assumption()` registra `AssumptionRecord` com status UNTESTED | `board.add_assumption(p); assert p.assumption_id in board._assumptions` | Must | Baixa |
+| RF-F1-07 | `flag_assumption()` transiciona Assumption de UNTESTED para FLAGGED | `board.flag_assumption("P-01", 1); assert board._assumptions["P-01"].status == "FLAGGED"` | Must | Baixa |
+| RF-F1-08 | `get_open_issues()` retorna apenas Issues com status OPEN, ordenados HIGH→MED→LOW | `issues = board.get_open_issues(); assert all(i.status == "OPEN" for i in issues)` | Must | Baixa |
+| RF-F1-09 | `has_blocking_issues()` retorna `True` apenas se houver Issue HIGH+OPEN | `board.add_issue(IssueRecord("ISS-01","HIGH",...)); assert board.has_blocking_issues() == True` | Must | Baixa |
+| RF-F1-10 | `add_issue()` com ID já existente ignora silenciosamente sem exceção | `board.add_issue(r); board.add_issue(r); assert len(board._issues) == 1` | Must | Baixa |
+| RF-F1-11 | `snapshot()` produz dict serializável em JSON com todos os records | `data = board.snapshot(); json.dumps(data)` — sem exceção | Must | Média |
+| RF-F1-12 | `persist(path)` grava snapshot em disco; `from_snapshot()` reconstrói Board idêntico | `board.persist(p); b2 = ValidationBoard.from_snapshot(json.load(open(p))); assert b2.get_stats() == board.get_stats()` | Must | Média |
+| RF-F1-13 | `persist()` com `OSError` não propaga exceção — apenas loga | `board.persist("/root/sem_permissao.json")` — sem exceção levantada para chamador | Must | Baixa |
+| RF-F1-14 | `DebateStateTracker.extract_issues_from_critique()` extrai issues de tabela Markdown (nível 1) | Com fixture de tabela de 3 issues → retorna lista com 3 IDs registrados no Board | Must | Média |
+| RF-F1-15 | `extract_issues_from_critique()` extrai issues de bullets com severidade (nível 2) | Com fixture de bullets → retorna lista com issues registrados | Must | Média |
+| RF-F1-16 | `extract_issues_from_critique()` extrai issues via heurística de keywords (nível 3) | Com fixture de texto livre contendo "vulnerabilidade crítica" → retorna ≥ 1 issue SECURITY/HIGH | Must | Alta |
+| RF-F1-17 | `extract_issues_from_critique()` retorna `[]` sem exceção quando nenhum nível extrai | Com fixture de texto sem keywords → retorna `[]` | Must | Baixa |
+| RF-F1-18 | `extract_resolutions_from_defense()` marca Issues como RESOLVED quando mencionados em "Pontos Aceitos" | Com fixture com "## Pontos Aceitos\n- ISS-01..." → `board._issues["ISS-01"].status == "RESOLVED"` | Must | Alta |
+| RF-F1-19 | `extract_decisions_from_text()` extrai decisões de texto de agente e registra no Board | Com fixture com "## Decisões\n- D-01: usar Jaccard..." → `"D-01" in board._decisions` | Must | Média |
+| RF-F1-20 | `register_assumptions_from_text()` extrai pressupostos de proposta estruturada e registra como UNTESTED | Com fixture simulando Round 0 → `len(board.get_untested_assumptions()) >= 1` | Must | Média |
+| RF-F1-21 | Deduplicação: descrição normalizada idêntica não registra issue duplicado | Com dois issues de descrição similar → Board contém apenas 1 | Must | Média |
+| RF-F1-22 | `get_consolidation_summary()` retorna string Markdown com ≤ 2500 chars | `summary = board.get_consolidation_summary(); assert len(summary) <= 2500` | Must | Baixa |
+| RF-F1-23 | `get_issues_for_proponent_prompt()` inclui apenas Issues OPEN com hint de ação | Output contém "DEVE ENDEREÇAR" e cada issue_id OPEN | Should | Baixa |
+| RF-F1-24 | `get_validated_decisions_prompt()` inclui apenas Decisions VALIDATED | Output não contém decisions PROPOSED ou CONTESTED | Should | Baixa |
+
+### 6.2 Requisitos Não-Funcionais
+
+| ID | Categoria | Requisito | Métrica | Target |
+|---|---|---|---|---|
+| RNF-F1-01 | Performance | Overhead total do Tracker (3 níveis) por round | Tempo de execução | < 50ms para texto de até 3000 chars |
+| RNF-F1-02 | Performance | `persist()` incluindo serialização JSON | Tempo de execução | < 100ms para Board com 100 records |
+| RNF-F1-03 | Resiliência | Parser falha graciosamente em qualquer input | Taxa de exceções não tratadas | 0 exceções propagadas para chamador |
+| RNF-F1-04 | Determinismo | Zero chamadas LLM em qualquer método | Imports de `model_provider` | 0 imports em `validation_board.py` e `debate_state_tracker.py` |
+| RNF-F1-05 | Testabilidade | Cobertura de testes unitários | % linhas cobertas | ≥ 90% nos dois módulos |
+| RNF-F1-06 | Observabilidade | Toda falha de parsing emite log de nível INFO | Eventos logados por round | 1 log por chamada ao Tracker com nível e count |
+| RNF-F1-07 | Manutenibilidade | Zero imports circulares | `import` de `debate_engine` ou `controller` nos novos módulos | 0 |
+| RNF-F1-08 | Compatibilidade | `from_snapshot(board.snapshot())` é identidade | `board.get_stats() == reconstituted.get_stats()` | 100% dos campos |
+
+### 6.3 Matriz de Rastreabilidade
+
+| RF/RNF | Componente | Arquivo | Método/Função | Teste que Valida | Critério Binário |
+|---|---|---|---|---|---|
+| RF-F1-01 | ValidationBoard | `validation_board.py` | `add_issue()` | `test_validation_board.py::test_add_issue_initial_status_open` | `status == "OPEN"` |
+| RF-F1-02 | ValidationBoard | `validation_board.py` | `resolve_issue()` | `test_validation_board.py::test_resolve_issue_transitions_to_resolved` | `status == "RESOLVED"` |
+| RF-F1-03 | ValidationBoard | `validation_board.py` | `resolve_issue()` | `test_validation_board.py::test_resolve_already_resolved_raises` | `pytest.raises(InvalidStateTransitionError)` |
+| RF-F1-04 | ValidationBoard | `validation_board.py` | `add_decision()` | `test_validation_board.py::test_add_decision_initial_status_proposed` | `status == "PROPOSED"` |
+| RF-F1-05 | ValidationBoard | `validation_board.py` | `validate_decision()` | `test_validation_board.py::test_validate_decision_transitions` | `status == "VALIDATED"` |
+| RF-F1-06 | ValidationBoard | `validation_board.py` | `add_assumption()` | `test_validation_board.py::test_add_assumption_initial_status_untested` | `status == "UNTESTED"` |
+| RF-F1-07 | ValidationBoard | `validation_board.py` | `flag_assumption()` | `test_validation_board.py::test_flag_assumption_transitions` | `status == "FLAGGED"` |
+| RF-F1-08 | ValidationBoard | `validation_board.py` | `get_open_issues()` | `test_validation_board.py::test_get_open_issues_filters_and_orders` | `all(i.status == "OPEN" for i in result)` |
+| RF-F1-09 | ValidationBoard | `validation_board.py` | `has_blocking_issues()` | `test_validation_board.py::test_has_blocking_issues_high_open` | `result == True` |
+| RF-F1-10 | ValidationBoard | `validation_board.py` | `add_issue()` | `test_validation_board.py::test_add_issue_duplicate_id_ignored` | `len(board._issues) == 1` |
+| RF-F1-11 | ValidationBoard | `validation_board.py` | `snapshot()` | `test_validation_board.py::test_snapshot_is_json_serializable` | `json.dumps(snapshot)` sem exceção |
+| RF-F1-12 | ValidationBoard | `validation_board.py` | `persist()`, `from_snapshot()` | `test_validation_board.py::test_persist_and_restore_round_trip` | `stats_before == stats_after` |
+| RF-F1-13 | ValidationBoard | `validation_board.py` | `persist()` | `test_validation_board.py::test_persist_oserror_no_exception` | sem `pytest.raises` |
+| RF-F1-14 | DebateStateTracker | `debate_state_tracker.py` | `extract_issues_from_critique()` | `test_debate_state_tracker.py::test_extract_level1_table` | `len(ids) == fixture_count` |
+| RF-F1-15 | DebateStateTracker | `debate_state_tracker.py` | `extract_issues_from_critique()` | `test_debate_state_tracker.py::test_extract_level2_bullets` | `len(ids) >= 1` |
+| RF-F1-16 | DebateStateTracker | `debate_state_tracker.py` | `extract_issues_from_critique()` | `test_parser_levels.py::test_level3_keyword_heuristic` | `len(ids) >= 1 and ids[0] in board._issues` |
+| RF-F1-17 | DebateStateTracker | `debate_state_tracker.py` | `extract_issues_from_critique()` | `test_parser_levels.py::test_parser_returns_empty_on_no_match` | `result == []` |
+| RF-F1-18 | DebateStateTracker | `debate_state_tracker.py` | `extract_resolutions_from_defense()` | `test_debate_state_tracker.py::test_extract_resolutions_marks_resolved` | `board._issues["ISS-01"].status == "RESOLVED"` |
+| RF-F1-19 | DebateStateTracker | `debate_state_tracker.py` | `extract_decisions_from_text()` | `test_debate_state_tracker.py::test_extract_decisions_from_proponent` | `"D-01" in board._decisions` |
+| RF-F1-20 | DebateStateTracker | `debate_state_tracker.py` | `register_assumptions_from_text()` | `test_debate_state_tracker.py::test_register_assumptions_from_round0` | `len(board.get_untested_assumptions()) >= 1` |
+| RF-F1-21 | DebateStateTracker | `debate_state_tracker.py` | `_deduplicate()` | `test_debate_state_tracker.py::test_dedup_normalized_description` | `len(board._issues) == 1` |
+| RF-F1-22 | ValidationBoard | `validation_board.py` | `get_consolidation_summary()` | `test_validation_board.py::test_consolidation_summary_max_chars` | `len(result) <= 2500` |
+| RF-F1-23 | ValidationBoard | `validation_board.py` | `get_issues_for_proponent_prompt()` | `test_validation_board.py::test_proponent_prompt_contains_open_only` | `"DEVE ENDEREÇAR" in result` |
+| RF-F1-24 | ValidationBoard | `validation_board.py` | `get_validated_decisions_prompt()` | `test_validation_board.py::test_validated_decisions_prompt_no_proposed` | `"PROPOSED" not in result` |
+| RNF-F1-04 | Ambos | ambos | — | `test_parser_levels.py::test_no_llm_imports` | `"model_provider" not in imports` |
+| RNF-F1-05 | Ambos | ambos | — | `pytest --cov=src/core/validation_board --cov=src/debate/debate_state_tracker` | `coverage >= 90%` |
+
+---
+
+## PARTE 7 — ÁRVORE DE ARQUIVOS E BLUEPRINT ESTRUTURAL
+
+### 7.1 Arquivos Criados nesta Fase
+
+```
+idea-forge/src/
+├── core/
+│   └── validation_board.py          ← NOVO (W1-02)
+│
+└── debate/
+    └── debate_state_tracker.py      ← REESCRITO (W1-03, breaking changes)
+
+tests/
+├── fixtures/
+│   ├── mock_critic_responses.py     ← NOVO (fixtures para parser)
+│   ├── mock_proponent_responses.py  ← NOVO (fixtures para resoluções)
+│   └── sample_ideas.py              ← NOVO (fixtures para Round 0)
+│
+└── unit/
+    ├── test_validation_board.py     ← NOVO
+    ├── test_debate_state_tracker.py ← NOVO
+    └── test_parser_levels.py        ← NOVO
+```
+
+### 7.2 Arquivos Modificados nesta Fase
+
+```
+idea-forge/src/
+└── debate/
+    └── debate_state_tracker.py      ← REESCRITO (v1 → v2, breaking API)
+```
+
+### 7.3 Arquivos NÃO Tocados (congelados nesta fase)
+
+```
+idea-forge/src/core/blackboard.py         ← intocado
+idea-forge/src/core/artifact_store.py     ← intocado
+idea-forge/src/core/controller.py         ← intocado (será reescrito na Onda 2)
+idea-forge/src/core/pipeline_logger.py    ← intocado
+idea-forge/src/debate/debate_engine.py    ← intocado (será reescrito na Onda 2)
+idea-forge/src/agents/                    ← intocado
+idea-forge/src/cli/                       ← intocado
+```
+
+### 7.4 Descrição por Arquivo Crítico
+
+**`src/core/validation_board.py`**
+- **Propósito:** Estado mestre do debate. Única fonte de verdade para Issues, Decisões e Pressupostos. Expõe queries tipadas e serialização.
+- **Deps:** `dataclasses`, `typing`, `json`, `os`, `hashlib`, `datetime`, `re`
+- **Interfaces públicas:**
+```python
+class InvalidStateTransitionError(Exception): ...
+
+class ValidationBoard:
+    def add_issue(self, record: IssueRecord) -> None
+    def resolve_issue(self, issue_id: str, round_num: int, resolution: str) -> None
+    def defer_issue(self, issue_id: str, round_num: int) -> None
+    def add_decision(self, record: DecisionRecord) -> None
+    def validate_decision(self, decision_id: str, round_num: int, evidence: str) -> None
+    def contest_decision(self, decision_id: str, round_num: int) -> None
+    def add_assumption(self, record: AssumptionRecord) -> None
+    def validate_assumption(self, assumption_id: str, round_num: int, evidence: str) -> None
+    def flag_assumption(self, assumption_id: str, round_num: int) -> None
+    def get_open_issues(self) -> List[IssueRecord]
+    def get_validated_decisions(self) -> List[DecisionRecord]
+    def get_untested_assumptions(self) -> List[AssumptionRecord]
+    def has_blocking_issues(self) -> bool
+    def get_stats(self) -> Dict[str, int]
+    def get_issues_for_proponent_prompt(self) -> str
+    def get_open_issues_for_critic_prompt(self) -> str
+    def get_validated_decisions_prompt(self) -> str
+    def get_consolidation_summary(self) -> str
+    def snapshot(self) -> Dict[str, Any]
+    def persist(self, path: str = ".forge/validation_board.json") -> None
+    @classmethod
+    def from_snapshot(cls, data: Dict[str, Any]) -> 'ValidationBoard'
+```
+- **Quem usa:** `DebateStateTracker` (escrita), `DebateEngine` (leitura/persist), `AdaptiveOrchestrator` (leitura), `SynthesizerAgent` (leitura)
+
+**`src/debate/debate_state_tracker.py`**
+- **Propósito:** Parser stateless de texto de agentes. Recebe string, retorna records registrados no Board. Não armazena estado.
+- **Deps:** `re`, `typing`, `validation_board` (IssueRecord, DecisionRecord, AssumptionRecord, ValidationBoard)
+- **Interfaces públicas:**
+```python
+STOPWORDS_PT: Set[str]  # constante de módulo
+
+class DebateStateTracker:
+    def extract_issues_from_critique(
+        self, critique_text: str, round_num: int, board: ValidationBoard
+    ) -> List[str]  # IDs registrados
+
+    def extract_resolutions_from_defense(
+        self, defense_text: str, round_num: int, board: ValidationBoard
+    ) -> List[str]  # IDs resolvidos
+
+    def extract_decisions_from_text(
+        self, text: str, round_num: int, board: ValidationBoard
+    ) -> List[str]  # IDs de decisões registradas
+
+    def register_assumptions_from_text(
+        self, text: str, round_num: int, board: ValidationBoard
+    ) -> List[str]  # IDs de pressupostos registrados
+```
+- **Quem usa:** `DebateEngine` (a ser reescrito na Onda 2)
+
+**`tests/fixtures/mock_critic_responses.py`**
+- **Propósito:** Strings pré-definidas simulando saída do CriticAgent em 3 formatos (tabela, bullets, texto livre) com contagem exata de issues conhecida.
+- **Deps:** nenhuma (apenas constantes)
+- **Interfaces públicas:**
+```python
+CRITIC_RESPONSE_TABLE_3_ISSUES: str    # tabela com ISS-01, ISS-02, ISS-03
+CRITIC_RESPONSE_BULLETS_2_ISSUES: str  # bullets com [HIGH] e [MED]
+CRITIC_RESPONSE_FREE_TEXT_SECURITY: str # texto com "vulnerabilidade crítica"
+CRITIC_RESPONSE_NO_ISSUES: str         # texto sem nenhum issue detectável
+EXPECTED_ISSUE_COUNT: Dict[str, int]   # {"table": 3, "bullets": 2, "free": 1, "none": 0}
+```
+
+**`tests/fixtures/mock_proponent_responses.py`**
+- **Propósito:** Strings simulando saída do ProponentAgent com seções "## Pontos Aceitos" e "## Melhorias Propostas".
+- **Deps:** nenhuma
+- **Interfaces públicas:**
+```python
+DEFENSE_WITH_ACCEPTED_ISS01: str    # aceita ISS-01 explicitamente por ID
+DEFENSE_WITH_ACCEPTED_BY_CATEGORY: str  # aceita por menção de categoria SECURITY
+DEFENSE_WITH_DEFERRED_ISS02: str    # defere ISS-02 para v2
+DEFENSE_NO_ACCEPTED: str            # sem seção Pontos Aceitos
+```
+
+**`tests/fixtures/sample_ideas.py`**
+- **Propósito:** Textos de proposta estruturada simulando Round 0 com pressupostos embutidos.
+- **Deps:** nenhuma
+- **Interfaces públicas:**
+```python
+PROPOSAL_WITH_3_ASSUMPTIONS: str    # proposta com 3 premissas explícitas
+PROPOSAL_NO_ASSUMPTIONS: str        # proposta sem premissas identificáveis
+```
+
+---
+
+## PARTE 8 — DECISÕES ARQUITETURAIS (ADRs)
+
+| Campo | ADR-F1-01 |
+|---|---|
+| **Status** | ACEITA |
+| **Data** | 23/04/2026 |
+| **Contexto** | `DebateStateTracker` v1 armazenava `self.issues: Dict` e era simultaneamente parser e storage, impossibilitando teste isolado de cada responsabilidade |
+| **Decisão** | `DebateStateTracker` v2 é **stateless**: recebe Board como parâmetro em cada chamada, nunca armazena records internamente |
+| **Alternativas Rejeitadas** | Manter `self.issues` no Tracker e sincronizar com Board (observer pattern) — rejeitado por duplicidade de estado e risco de dessincronização |
+| **Consequências** | (+) Tracker testável sem Board real (usando Board mock). (+) Board é a única fonte de verdade. (-) Signature de todos os métodos do Tracker muda — breaking change |
+| **Mitigação** | `debate_engine.py` será reescrito na Onda 2 de qualquer forma; breaking change é aceitável agora |
+
+| Campo | ADR-F1-02 |
+|---|---|
+| **Status** | ACEITA |
+| **Data** | 23/04/2026 |
+| **Contexto** | Precisamos detectar issues em texto de modelos < 3B que não seguem formato de tabela |
+| **Decisão** | Parser de 3 níveis com degradação graciosa: tabela → bullets → heurística de keywords. Nível 3 usa lookup de keywords categorizadas + keywords de severidade, sem LLM |
+| **Alternativas Rejeitadas** | (1) Prompt o próprio LLM para estruturar sua saída — rejeitado por violar invariante "zero LLM no fluxo de estado". (2) spaCy NER — rejeitado por overhead de instalação (modelo 500MB) para problema solucionável com regex |
+| **Consequências** | (+) Parser determinístico e testável. (+) Funciona offline. (-) Nível 3 pode gerar falsos positivos para textos com keywords fora de contexto |
+| **Mitigação** | Threshold mínimo: keyword de severidade E keyword de categoria devem ambas estar presentes na mesma frase (split por `.` e `\n`). Falsos positivos geram issues LOW que o Orquestrador ignora |
+
+| Campo | ADR-F1-03 |
+|---|---|
+| **Status** | ACEITA |
+| **Data** | 23/04/2026 |
+| **Contexto** | Estado do debate precisa sobreviver a falhas do processo Python |
+| **Decisão** | `ValidationBoard.persist()` usa o mesmo padrão `snapshot()`/`from_snapshot()` do `Blackboard` existente, gravando em `.forge/validation_board.json` |
+| **Alternativas Rejeitadas** | (1) SQLite — overhead desnecessário para estado simples. (2) Pickle — não legível por humanos, impossível de inspecionar manualmente |
+| **Consequências** | (+) Inspeção manual do estado via qualquer editor JSON. (+) Coerência com padrão já estabelecido no projeto. (-) JSON não é atômico — falha no meio da escrita pode corromper |
+| **Mitigação** | Gravar em arquivo temporário e renomear atomicamente via `os.replace()` em sistemas que suportam (POSIX); fallback para escrita direta em Windows |
+
+| Campo | ADR-F1-04 |
+|---|---|
+| **Status** | ACEITA |
+| **Data** | 23/04/2026 |
+| **Contexto** | Pressupostos (P-XX) serão populados pelo Round 0 (ProponentAgent modo expansão), que só existirá na Onda 2 |
+| **Decisão** | Implementar `register_assumptions_from_text()` na Fase 1 com testes usando fixtures que simulam o formato esperado do Round 0. API está pronta; chamador virá na Onda 2. |
+| **Alternativas Rejeitadas** | Adiar `AssumptionRecord` e `register_assumptions_from_text()` para a Onda 2 — rejeitado porque cria dependência de ordem: Onda 2 precisaria de API do Board que ainda não existe |
+| **Consequências** | (+) Onda 2 encontra API completa e testada. (-) Método testado com fixture, não com saída real do ProponentAgent |
+| **Mitigação** | Fixtures são baseados no formato exato documentado no PRD para a proposta do Round 0 (7 seções com "Premissas:") |
+
+| Campo | ADR-F1-05 |
+|---|---|
+| **Status** | ACEITA |
+| **Data** | 23/04/2026 |
+| **Contexto** | `debate_engine._extract_decisions_from_transcript()` contém lógica de parsing de decisões acoplada ao motor de debate |
+| **Decisão** | Mover toda a lógica de extração de decisões para `DebateStateTracker.extract_decisions_from_text()`. O método em `debate_engine` fica deprecated mas não é removido agora (remoção na Onda 2). |
+| **Alternativas Rejeitadas** | Reescrever `debate_engine` agora para usar o novo Tracker — rejeitado por sair do escopo da Fase 1 e criar risco de regressão |
+| **Consequências** | (+) Nova lógica testada isoladamente. (-) Duplicidade temporária de código até Onda 2 |
+| **Mitigação** | Comentar `debate_engine._extract_decisions_from_transcript()` com `# DEPRECATED: usar DebateStateTracker.extract_decisions_from_text() — remover na Onda 2` |
+
+| Campo | ADR-F1-06 |
+|---|---|
+| **Status** | ACEITA |
+| **Data** | 23/04/2026 |
+| **Contexto** | Precisamos garantir que issues duplicados (mesmo issue re-extraído em round seguinte) não poluam o Board |
+| **Decisão** | Deduplicação por dois mecanismos: (1) ID explícito — se `issue_id` já existe, `add_issue()` ignora silenciosamente; (2) Descrição normalizada — prefixo de 40 chars normalizado (lowercase, sem stopwords, sem pontuação) mantido em `Set` interno do Board |
+| **Alternativas Rejeitadas** | Similaridade Jaccard entre descrições — rejeitado por custo O(n²) em Board com muitos issues e por ser a mesma técnica do ConvergenceDetector (não misturar responsabilidades) |
+| **Consequências** | (+) Deduplicação O(1) por ID. (+) Deduplicação O(1) por hash de prefixo. (-) Dois issues com descrições muito similares mas prefixos diferentes passam — aceitável para MVP |
+| **Mitigação** | Nível 3 do parser já gera issues com IDs auto-incrementais únicos; o risco é de issues semanticamente similares, não de IDs duplicados |
+
+---
+
+## PARTE 9 — PLANO DE IMPLEMENTAÇÃO (Fase 1)
+
+### 9.1 O que está no escopo desta fase
+
+- ✅ `IssueRecord`, `DecisionRecord`, `AssumptionRecord` (dataclasses)
+- ✅ `InvalidStateTransitionError` (exceção tipada)
+- ✅ `ValidationBoard` — todos os métodos listados na seção 2.1
+- ✅ `DebateStateTracker` — reescrito stateless com Board como parâmetro
+- ✅ Parser nível 1 (tabela Markdown)
+- ✅ Parser nível 2 (bullets com severidade)
+- ✅ Parser nível 3 (heurística por keywords) — **novo**
+- ✅ `register_assumptions_from_text()` — **novo**
+- ✅ `extract_decisions_from_text()` — **movido de debate_engine**
+- ✅ Persistência `persist()` / `from_snapshot()` no ValidationBoard
+- ✅ Todos os testes unitários (RF-F1-01 a RF-F1-24)
+- ✅ Fixtures de teste (`mock_critic_responses.py`, `mock_proponent_responses.py`, `sample_ideas.py`)
+
+### 9.2 O que NÃO está nesta fase
+
+- ❌ `AdaptiveOrchestrator` (W1-05 — Fase 2)
+- ❌ `ConvergenceDetector` (W1-04 — Fase 2)
+- ❌ Reescrita do `debate_engine.py` (Onda 2)
+- ❌ Reescrita do `controller.py` (Onda 2)
+- ❌ `ProponentAgent` modo expansão / Round 0 real (Onda 2)
+- ❌ Integração do Board com o pipeline existente (Onda 2)
+- ❌ Testes de integração completos com MockProvider LLM (Onda 2)
+
+### 9.3 Critérios de Aceitação da Fase 1
+
+```gherkin
+DADO um ValidationBoard vazio
+QUANDO add_issue(IssueRecord("ISS-01", "HIGH", "SECURITY", "descrição"))
+ENTÃO get_open_issues() retorna lista com 1 item e has_blocking_issues() == True
+
+DADO um Issue com status OPEN
+QUANDO resolve_issue("ISS-01", round_num=2, resolution="aceito pelo proponente")
+ENTÃO issue.status == "RESOLVED" e get_open_issues() retorna lista vazia
+
+DADO um Issue com status RESOLVED
+QUANDO resolve_issue("ISS-01", round_num=3, resolution="x")
+ENTÃO InvalidStateTransitionError é levantada
+
+DADO um ValidationBoard com 3 issues (1 RESOLVED, 2 OPEN) e 1 Decision VALIDATED
+QUANDO snapshot() seguido de from_snapshot(snapshot)
+ENTÃO get_stats() do Board reconstruído == get_stats() do Board original
+
+DADO texto do Critic em formato de tabela Markdown com 3 issues
+QUANDO extract_issues_from_critique(texto, round_num=1, board)
+ENTÃO len(retorno) == 3 E todos os 3 IDs estão em board._issues
+
+DADO texto do Critic em prosa livre com a frase "vulnerabilidade crítica de segurança"
+QUANDO extract_issues_from_critique(texto, round_num=1, board)
+ENTÃO len(retorno) >= 1 E board._issues contém issue com category=="SECURITY" e severity=="HIGH"
+
+DADO texto do Critic sem nenhuma keyword de issue
+QUANDO extract_issues_from_critique(texto, round_num=1, board)
+ENTÃO retorno == [] E nenhuma exceção é levantada
+
+DADO texto do Proponent com "## Pontos Aceitos\n- ISS-01: vulnerabilidade endereçada"
+E board com ISS-01 em status OPEN
+QUANDO extract_resolutions_from_defense(texto, round_num=2, board)
+ENTÃO board._issues["ISS-01"].status == "RESOLVED"
+
+DADO um ValidationBoard com 5 issues variados e 3 decisions
+QUANDO get_consolidation_summary()
+ENTÃO len(resultado) <= 2500
+
+DADO persist() chamado com path sem permissão de escrita
+QUANDO persist("/root/test.json")
+ENTÃO nenhuma exceção propagada para o chamador
+
+DADO que pytest tests/unit/ -v é executado
+QUANDO todos os testes desta fase são executados
+ENTÃO 100% dos testes passam em < 10 segundos
+```
+
+### 9.4 Sequência de Implementação (TDD)
+
+| Passo | Ação | Arquivo(s) | Critério de Conclusão |
+|---|---|---|---|
+| 1 | Criar fixtures de teste | `tests/fixtures/mock_critic_responses.py`, `mock_proponent_responses.py`, `sample_ideas.py` | Arquivos importáveis sem erro |
+| 2 | Escrever testes do ValidationBoard (FALHAM) | `tests/unit/test_validation_board.py` | `pytest test_validation_board.py` — todos FALHAM (módulo não existe) |
+| 3 | Implementar data models + exceção | `src/core/validation_board.py` | `IssueRecord`, `DecisionRecord`, `AssumptionRecord`, `InvalidStateTransitionError` importáveis |
+| 4 | Implementar `ValidationBoard` — métodos de escrita e transição | `src/core/validation_board.py` | Testes RF-F1-01 a RF-F1-10 PASSAM |
+| 5 | Implementar `ValidationBoard` — métodos de leitura e prompts | `src/core/validation_board.py` | Testes RF-F1-08, RF-F1-09, RF-F1-22, RF-F1-23, RF-F1-24 PASSAM |
+| 6 | Implementar `snapshot()`, `persist()`, `from_snapshot()` | `src/core/validation_board.py` | Testes RF-F1-11, RF-F1-12, RF-F1-13 PASSAM |
+| 7 | Escrever testes do DebateStateTracker (FALHAM) | `tests/unit/test_debate_state_tracker.py`, `test_parser_levels.py` | Todos FALHAM (módulo v2 não existe) |
+| 8 | Reescrever `DebateStateTracker` — parser nível 1 e 2 | `src/debate/debate_state_tracker.py` | Testes RF-F1-14, RF-F1-15, RF-F1-17 PASSAM |
+| 9 | Implementar parser nível 3 (heurística) | `src/debate/debate_state_tracker.py` | Teste RF-F1-16 PASSA |
+| 10 | Implementar `extract_resolutions_from_defense()` | `src/debate/debate_state_tracker.py` | Teste RF-F1-18 PASSA |
+| 11 | Implementar `extract_decisions_from_text()` | `src/debate/debate_state_tracker.py` | Teste RF-F1-19 PASSA |
+| 12 | Implementar `register_assumptions_from_text()` | `src/debate/debate_state_tracker.py` | Teste RF-F1-20 PASSA |
+| 13 | Implementar deduplicação | `src/debate/debate_state_tracker.py` | Teste RF-F1-21 PASSA |
+| 14 | Verificar cobertura e RNFs | ambos os módulos | `pytest --cov >= 90%`, zero imports LLM, `pytest tests/unit/ -v` 100% verde |
+| 15 | Deprecar método em debate_engine | `src/debate/debate_engine.py` | Comentário `# DEPRECATED` adicionado, testes existentes ainda passam |
+
+### 9.5 Métricas de Sucesso da Fase 1
+
+| Métrica | Target | Como Medir |
+|---|---|---|
+| Testes unitários passando | 100% | `pytest tests/unit/ -v` |
+| Cobertura de código | ≥ 90% nos 2 módulos | `pytest --cov=src/core/validation_board --cov=src/debate/debate_state_tracker --cov-report=term` |
+| Tempo total da suíte unitária | < 10 segundos | `pytest tests/unit/ --tb=short` — tempo no rodapé |
+| Zero imports LLM nos novos módulos | 0 | `grep -n "model_provider\|ollama\|cloud_provider" src/core/validation_board.py src/debate/debate_state_tracker.py` → saída vazia |
+| Round-trip de persistência | 100% fidelidade | `test_persist_and_restore_round_trip` PASSA |
+| Parser nível 3 sem falsos negativos em fixtures conhecidas | 100% | `test_level3_keyword_heuristic` PASSA |
+
+### 9.6 Riscos Técnicos
+
+| Risco | Probabilidade | Impacto | Mitigação |
+|---|---|---|---|
+| Regex de tabela não captura variações de formatação Markdown (espaços extras, pipes escapados) | Média | Médio | Usar `re.IGNORECASE` + strip() em cada grupo capturado; fixtures cobrem variações |
+| Parser nível 3 gera falsos positivos para texto com keywords fora de contexto | Média | Baixo | Exigir keyword de severidade E de categoria na mesma frase; issues spurious são LOW e ignorados pelo Orquestrador |
+| `extract_resolutions_from_defense()` não detecta resolução implícita (Proponente endereça issue sem mencionar ID) | Alta | Médio | Match por ID + match por prefixo de 40 chars da descrição + match por categoria; 3 estratégias cobertas |
+| Escrita atômica do JSON falha em Windows (os.replace não disponível) | Baixa | Baixo | Fallback para escrita direta; falha capturada e logada |
+| Reescrita do Tracker quebra imports em `debate_engine.py` | Certa | Baixo | `debate_engine.py` ainda importa `DebateStateTracker` mas não chama os novos métodos; API pública muda mas pode ser ignorada até Onda 2 |
+| `get_consolidation_summary()` excede 2500 chars com Board muito populado | Baixa | Baixo | Truncar descrições a 80 chars e limitar listas a top 10 por tipo; `assert len(summary) <= 2500` no teste |
+| Fingerprint SHA-256 inconsistente entre sistemas (encoding) | Baixa | Baixo | Sempre usar `json.dumps(data, ensure_ascii=False, sort_keys=True).encode('utf-8')` para gerar fingerprint |
+| Deduplicação por prefixo de 40 chars normalizado gera colisão para issues legítimos muito similares | Baixa | Baixo | Colisão resulta em issue não registrado — aceitável para MVP; usar `len(desc_key) > 15` antes de verificar |
+
+---
+
+## PARTE 10 — PADRÕES E BLINDAGEM ESTRUTURAL
+
+### 10.1 Padrões Arquiteturais Adotados
+
+| Padrão | Onde Aplicado |
+|---|---|
+| **State Machine** | `ValidationBoard` — cada tipo de record tem transições explícitas e validadas |
+| **Chain of Responsibility** | `DebateStateTracker` — parser nível 1 → 2 → 3 → fallback vazio |
+| **Dependency Injection** | `ValidationBoard` injetado como parâmetro em todos os métodos do Tracker |
+| **Repository Pattern** | `ValidationBoard` como repositório tipado de records imutáveis (records são dataclasses) |
+| **Snapshot** | `ValidationBoard.snapshot()` / `from_snapshot()` para serialização/deserialização |
+
+### 10.2 Regras de Modularização
+
+- `validation_board.py` **não importa** `debate_state_tracker`, `debate_engine`, `controller`, `planner` ou qualquer modelo LLM.
+- `debate_state_tracker.py` **não importa** `debate_engine`, `controller`, `planner`, `artifact_store` ou qualquer modelo LLM.
+- `debate_state_tracker.py` **pode importar** apenas `validation_board` (para tipos e Board).
+- Nenhum módulo desta fase importa o outro circularmente.
+
+### 10.3 Escopo Congelado
+
+| Proibido nesta fase | Motivo |
+|---|---|
+| Modificar `debate_engine.py` além do comentário DEPRECATED | Risco de regressão; escopo da Onda 2 |
+| Modificar `controller.py` ou `planner.py` | Escopo da Onda 2 |
+| Adicionar chamadas LLM em qualquer método novo | Viola invariante global do projeto |
+| Usar `self.issues` ou qualquer storage interno no `DebateStateTracker` | Viola ADR-F1-01 |
+| Criar integração com `ArtifactStore` nesta fase | Escopo da Onda 2 |
+
+### 10.4 Observabilidade
+
+```python
+# Logging obrigatório em DebateStateTracker:
+import logging
+logger = logging.getLogger(__name__)
+
+# Em extract_issues_from_critique():
+logger.info(f"[Tracker] Round {round_num}: "
+            f"Nível {nivel_usado} → {len(new_ids)} issues registrados")
+
+# Em extract_resolutions_from_defense():
+logger.info(f"[Tracker] Round {round_num}: "
+            f"{len(resolved_ids)} issues resolvidos: {resolved_ids}")
+
+# Em ValidationBoard.persist():
+logger.debug(f"[Board] Snapshot persistido em {path} "
+             f"({len(data['issues'])} issues, "
+             f"{len(data['decisions'])} decisions, "
+             f"{len(data['assumptions'])} assumptions)")
+
+# Em ValidationBoard.persist() — falha:
+logger.warning(f"[Board] Falha ao persistir em {path}: {e}")
+```
+
+---
+
+## PARTE 11 — GUIA DE REPLICAÇÃO (Fase 1)
+
+### Pré-requisitos
+
+| Requisito | Versão | Verificação |
+|---|---|---|
+| Python | 3.10+ | `python --version` |
+| pytest | 7.0+ | `pytest --version` |
+| pytest-cov | 4.0+ | `pytest-cov --version` |
+| Git (branch correta) | 2.30+ | `git branch` → deve mostrar `v2-debate-only` |
+
+### Passos
+
+```bash
+# 1. Confirmar branch correta
+git checkout v2-debate-only
+git status  # deve estar limpo
+
+# 2. Confirmar que testes existentes passam (baseline)
+pytest tests/ -v --tb=short
+# Esperado: testes existentes passam (ou nenhum teste existe ainda)
+
+# 3. Instalar pytest-cov se não tiver
+pip install pytest-cov
+
+# 4. Criar estrutura de diretórios de fixtures (se não existir)
+mkdir -p tests/fixtures tests/unit tests/integration tests/smoke
+touch tests/fixtures/__init__.py
+
+# 5. Implementar seguindo sequência TDD da seção 9.4
+# (escrever testes → rodar FALHAM → implementar → rodar PASSAM)
+
+# 6. Rodar suíte unitária completa
+pytest tests/unit/ -v
+
+# 7. Verificar cobertura
+pytest tests/unit/ --cov=idea-forge/src/core/validation_board \
+                   --cov=idea-forge/src/debate/debate_state_tracker \
+                   --cov-report=term-missing
+
+# 8. Verificar ausência de imports LLM
+grep -rn "model_provider\|ollama\|cloud_provider" \
+    idea-forge/src/core/validation_board.py \
+    idea-forge/src/debate/debate_state_tracker.py
+# Esperado: saída vazia
+
+# 9. Verificar que módulos existentes não foram quebrados
+pytest tests/ -v --tb=short
+# Esperado: todos os testes (novos + existentes) passam
+
+# 10. Verificar criação do diretório .forge/
+python -c "
+from idea_forge.src.core.validation_board import ValidationBoard, IssueRecord
+b = ValidationBoard()
+b.add_issue(IssueRecord('ISS-01', 'HIGH', 'SECURITY', 'teste'))
+b.persist('.forge/validation_board.json')
+import os; assert os.path.exists('.forge/validation_board.json')
+print('OK — .forge/validation_board.json criado')
+"
+```
+
+---
+
+## PARTE 12 — EXTENSIBILIDADE
+
+### Como adicionar nova Categoria de Issue (ex: `USABILITY`)
+
+1. Adicionar à constante `VALID_CATEGORIES` em `validation_board.py`
+2. Adicionar keywords PT e EN à tabela `KEYWORDS_BY_CATEGORY` em `debate_state_tracker.py`
+3. Adicionar keywords de exemplo à docstring da categoria
+4. Escrever teste em `test_parser_levels.py::test_level3_usability_keyword`
+5. Rodar `pytest tests/unit/test_parser_levels.py -v` — deve passar
+
+### Como adicionar novo tipo de Record (ex: `RiskRecord`)
+
+1. Criar dataclass em `validation_board.py` seguindo o padrão de `IssueRecord`
+2. Adicionar máquina de estados na constante `VALID_TRANSITIONS`
+3. Adicionar métodos `add_risk()`, `close_risk()` com validação de transição
+4. Incluir `risks` no `snapshot()` e `from_snapshot()`
+5. Adicionar método `get_risks_prompt()` para injeção em prompts
+6. Escrever testes completos antes de qualquer código de produção
+
+---
+
+## PARTE 13 — LIMITAÇÕES CONHECIDAS
+
+| ID | Limitação | Impacto | Workaround | Quando Resolvida |
+|---|---|---|---|---|
+| LIM-F1-01 | Parser nível 3 pode gerar falsos positivos para texto com keywords fora de contexto | Issues LOW espurios no Board | Orquestrador ignora issues LOW para decisões CONTINUE/STOP | v2.1 — análise de contexto semântico |
+| LIM-F1-02 | `register_assumptions_from_text()` não testado com saída real do ProponentAgent (só fixtures) | Possível incompatibilidade de formato na Onda 2 | Fixtures baseadas no formato documentado no PRD | Onda 2 — teste de integração real |
+| LIM-F1-03 | Escrita do JSON não é atômica no Windows (sem `os.replace()` confiável) | Corrompimento do `.json` se processo morrer durante escrita | Estado em memória preservado; re-executar debate | v2.1 — implementar write-temp-then-rename |
+| LIM-F1-04 | Deduplicação por prefixo de 40 chars pode ter colisões para issues distintos com início similar | Issue legítimo não registrado silenciosamente | Log INFO indica count de issues registrados; diferença é detectável | v2.2 — hash de descrição completa |
+| LIM-F1-05 | `extract_resolutions_from_defense()` depende do formato "## Pontos Aceitos" que o ProponentAgent deve seguir | Se ProponentAgent não usar o heading, nenhuma resolução é detectada | Prompt do ProponentAgent inclui formato obrigatório (implementado na Onda 2) | Onda 2 — enforcement via prompt template |
+
+---
+
+## PARTE 14 — CHECKLIST DE COMPLETUDE
+
+- [x] Todo requisito tem ID único (RF-F1-XX, RNF-F1-XX) e critério de aceite verificável
+- [x] Todo requisito tem teste correspondente na matriz de rastreabilidade
+- [x] Toda decisão arquitetural tem ADR com alternativa rejeitada documentada
+- [x] Ambos os componentes têm ficha técnica, inputs, outputs e exemplos completos
+- [x] Todos os diagramas estão em Mermaid renderizável
+- [x] Todos os schemas de records têm exemplo JSON completo
+- [x] Todo cenário de falha tem estratégia de recuperação documentada (seção 5)
+- [x] O guia de replicação é autocontido (seção 11)
+- [x] Nenhuma seção contém "A DEFINIR"
+- [x] Escopo é preciso: W1-02 + W1-03 apenas
+
+---
+
+**Declaração de Determinismo**
+Este blueprint é suficiente para implementação sem decisões adicionais. Cada método tem assinatura, contrato de entrada/saída, comportamento de erro e teste correspondente definidos. A sequência TDD na seção 9.4 define a ordem exata de implementação. Nenhuma inferência é necessária além do conteúdo deste documento.

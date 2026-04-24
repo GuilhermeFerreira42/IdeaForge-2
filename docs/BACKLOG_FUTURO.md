@@ -2,7 +2,7 @@
 
 ## Intenção Original
 - **Objetivo:** Sistema que recebe ideia bruta, executa debate adaptativo entre agentes e gera Relatório de Ideia Validada como contrato de interface para geração de PRD por modelo grande.
-- **Estado Atual:** Fase 0 (Concluída) | 23/04/2026. PRD aprovado. Código v1 intacto na branch main.
+- **Estado Atual:** Fase 1 (Concluída) | 23/04/2026. Fundação de dados implantada.
 - **Meta Final:** Pipeline debate-only estável, testado com gpt-oss:20b-cloud, gerando relatórios que um modelo grande transforma em PRD completo.
 
 ---
@@ -12,14 +12,14 @@
 | ID | Técnica/Feature | Descrição | Arquivos Impactados | Critério de Aceite | Status |
 |---|---|---|---|---|---|
 | W1-01 | Branch + Limpeza | Criar branch v2-debate-only, deletar ~12 arquivos PRD-specific | Todo o repositório | Branch existe, arquivos PRD removidos, infra preservada intacta | CONCLUÍDO |
-| W1-02 | ValidationBoard | Quadro expandido com Issues + Decisões + Pressupostos, 3 tipos de registro com transições de estado | `core/validation_board.py` | Testes unitários passando: criar/atualizar/consultar os 3 tipos de registro | PENDENTE |
-| W1-03 | DebateStateTracker expandido | Parser de 3 níveis (tabela → bullets → heurística), extração de decisões e pressupostos | `debate/debate_state_tracker.py` | Testes com fixtures: ≥80% issues capturados em tabela, ≥60% em texto livre | PENDENTE |
-| W1-04 | ConvergenceDetector | Jaccard similarity com stopwords PT, threshold 0.7, detecção de convergência por 2 rounds sem issues novos | `core/convergence_detector.py` | Testes unitários: textos iguais→1.0, textos diferentes→<0.3, convergência detectada corretamente | PENDENTE |
-| W1-05 | AdaptiveOrchestrator | Lógica de CONTINUE/STOP/SPAWN baseada no tracker, limites rígidos, fallback para rounds fixos | `core/adaptive_orchestrator.py` | Testes: issues HIGH→CONTINUE, convergência→STOP, ≥3 mesma categoria→SPAWN, MAX_AGENTS→bloqueio | PENDENTE |
+| W1-02 | ValidationBoard | Quadro expandido com Issues + Decisões + Pressupostos, 3 tipos de registro com transições de estado | `core/validation_board.py` | Testes unitários passando: criar/atualizar/consultar os 3 tipos de registro | CONCLUÍDO |
+| W1-03 | DebateStateTracker expandido | Parser de 3 níveis (tabela → bullets → heurística), extração de decisões e pressupostos | `debate/debate_state_tracker.py` | Testes com fixtures: ≥80% issues capturados em tabela, ≥60% em texto livre | CONCLUÍDO |
+| W1-04 | ConvergenceDetector | Jaccard similarity com stopwords PT, threshold 0.7, detecção de convergência por 2 rounds sem issues novos | `core/convergence_detector.py` | Testes unitários: textos iguais→1.0, textos diferentes→<0.3, convergência detectada corretamente | CONCLUÍDO |
+| W1-05 | AdaptiveOrchestrator | Lógica de CONTINUE/STOP/SPAWN baseada no tracker, limites rígidos, fallback para rounds fixos | `core/adaptive_orchestrator.py` | Testes: issues HIGH→CONTINUE, convergência→STOP, ≥3 mesma categoria→SPAWN, MAX_AGENTS→bloqueio | CONCLUÍDO |
 
 ### Meta da Onda 1
 - **Critério binário:** `pytest tests/unit/ -v` passa com 100% nos 5 módulos acima + `pytest tests/integration/test_adaptive_rounds.py -v` passa
-- **Status:** PENDENTE
+- **Status:** CONCLUÍDO
 
 ---
 
