@@ -2,7 +2,7 @@
 
 ## Intenção Original
 - **Objetivo:** Sistema que recebe ideia bruta, executa debate adaptativo entre agentes e gera Relatório de Ideia Validada como contrato de interface para geração de PRD por modelo grande.
-- **Estado Atual:** Fase 1 (Concluída) | 23/04/2026. Fundação de dados implantada.
+- **Estado Atual:** Onda 2 (Concluída) | 25/04/2026. Motor de debate funcional.
 - **Meta Final:** Pipeline debate-only estável, testado com gpt-oss:20b-cloud, gerando relatórios que um modelo grande transforma em PRD completo.
 
 ---
@@ -21,84 +21,22 @@
 - **Critério binário:** `pytest tests/unit/ -v` passa com 100% nos 5 módulos acima + `pytest tests/integration/test_adaptive_rounds.py -v` passa
 - **Status:** CONCLUÍDO
 
-### CONTRATOS_DA_ONDA 1
-> Este bloco é PROPOSTO PELA IA com base no BACKLOG, CURRENT_STATE e DECISION_LOG.
-> O usuário revisa, corrige o que estiver errado e acrescenta o que a IA não tem como saber.
-> Só disparar o NEXUS após o usuário confirmar a proposta.
-> Campos marcados com [?] são lacunas que a IA não conseguiu inferir — o usuário deve preencher antes de confirmar.
-
-```yaml
-OUTPUT_SCHEMAS:
-  W1-02: ValidationBoard com 3 categorias e snapshots JSON.
-  W1-03: Regex degradável, parser stateless.
-  W1-04: Jaccard similarity entre rounds, sem LLM.
-  W1-05: OrchestratorDecision object (action, reason, category).
-
-ESCOPO_CONGELADO:
-  - agentes
-  - debate_engine.py
-
-ARQUIVOS_A_DELETAR:
-  - arquivos PRD specíficos de planning e regras PRD (Fase 0)
-
-REESCRITAS:
-  - DebateStateTracker: TOTAL
-
-SPECIALISTS_MVP:
-
-DECISOES_EXTRAS:
-  - Sem uso de chamadas LLM nas lógicas arquiteturais.
-```
-
 ---
 
 ## Onda 2 — Agentes e Debate (Fases 3-4)
 
 | ID | Técnica/Feature | Descrição | Arquivos Impactados | Critério de Aceite | Status |
 |---|---|---|---|---|---|
-| W2-01 | ProponentAgent modo expansão | Round 0: transformar ideia bruta em proposta estruturada de 7 seções | `agents/proponent_agent.py` | Teste com MockProvider: proposta gerada tem ≥7 seções não-vazias | PENDENTE |
-| W2-02 | CriticAgent refatorado | Remover lógica PRD, focar em debate puro contra proposta | `agents/critic_agent.py` | Teste com MockProvider: crítica gera issues parseáveis pelo tracker | PENDENTE |
-| W2-03 | Specialist Profiles | Banco de agentes especializados pré-definidos (Security, Feasibility, Scalability, UX) | `agents/specialist_profiles.py` | Teste: perfis carregam corretamente, prompts são válidos | PENDENTE |
-| W2-04 | DebateEngine refatorado | Integrar orquestrador adaptativo, usar tracker como ponte exclusiva, remover truncamentos | `debate/debate_engine.py` | Teste integração: debate completo com MockProvider, rounds dinâmicos, spawning funcional | PENDENTE |
-| W2-05 | Prompt Templates | Novos templates para debate v2: expansão, defesa, crítica, síntese | `core/prompt_templates.py` | Templates substituem os antigos, sem referência a PRD | PENDENTE |
+| W2-01 | ProponentAgent modo expansão | Round 0: transformar ideia bruta em proposta estruturada de 7 seções | `src/agents/proponent_agent.py` | Teste com MockProvider: proposta gerada tem ≥7 seções não-vazias | CONCLUÍDO |
+| W2-02 | ContextBuilder | Truncamento determinístico (≤3000 chars) e montagem de prompts | `src/debate/context_builder.py` | Garantir limite rígido e prioridade de budgets [COR-13] | CONCLUÍDO |
+| W2-03 | CriticAgent refatorado | Remover lógica PRD, focar em debate puro contra proposta | `src/agents/critic_agent.py` | Teste com MockProvider: crítica gera issues parseáveis pelo tracker | CONCLUÍDO |
+| W2-04 | Specialist Profiles | Banco de agentes especializados pré-definidos (Security, Feasibility, Scalability) | `src/agents/specialist_profiles.py` | Teste: perfis carregam corretamente, prompts são válidos | CONCLUÍDO |
+| W2-05 | RoundExecutor | Execução de turnos, canonicalização e aplicação de patches | `src/debate/round_executor.py` | Teste: patches aplicados na proposta, parsing detecta falhas (COR-14) | CONCLUÍDO |
+| W2-06 | DebateEngine | Integração completa do loop de debate adaptativo | `src/debate/debate_engine.py` | Teste integração: fluxo Round 0 → N Rounds funcional | CONCLUÍDO |
 
 ### Meta da Onda 2
-- **Critério binário:** `pytest tests/integration/test_debate_flow.py -v` e `pytest tests/integration/test_agent_spawning.py -v` passam
-- **Status:** PENDENTE
-
-### CONTRATOS_DA_ONDA 2
-> Este bloco é PROPOSTO PELA IA com base no BACKLOG, CURRENT_STATE e DECISION_LOG.
-> O usuário revisa, corrige o que estiver errado e acrescenta o que a IA não tem como saber.
-> Só disparar o NEXUS após o usuário confirmar a proposta.
-> Campos marcados com [?] são lacunas que a IA não conseguiu inferir — o usuário deve preencher antes de confirmar.
-
-```yaml
-OUTPUT_SCHEMAS:
-  W2-01: 7 seções exatas: Problema, Solução, Público-Alvo, Premissas, Diferencial, Riscos, Constraints.
-
-ESCOPO_CONGELADO:
-  - controller.py
-  - planner.py
-
-ARQUIVOS_A_DELETAR:
-  - ProductManagerAgent
-  - ArchitectAgent
-  - SecurityReviewerAgent
-  - ConsistencyCheckerAgent
-  - PlanGenerator
-
-REESCRITAS:
-  - DebateEngine: TOTAL
-
-SPECIALISTS_MVP:
-  - Security
-  - Feasibility
-  - Scalability
-  - UX
-
-DECISOES_EXTRAS:
-  - O blueprint atual deve cobrir a Onda 2 inteira (W2-01 a W2-05).
-```
+- **Critério binário:** `pytest tests/integration/test_debate_flow.py -v` passa com 100% de sucesso.
+- **Status:** CONCLUÍDO
 
 ---
 
@@ -106,35 +44,41 @@ DECISOES_EXTRAS:
 
 | ID | Técnica/Feature | Descrição | Arquivos Impactados | Critério de Aceite | Status |
 |---|---|---|---|---|---|
-| W3-01 | SynthesizerAgent | Juíza neutra que recebe quadro de validações e gera relatório em Markdown | `agents/synthesizer_agent.py` | Teste com MockProvider: relatório tem todas as seções obrigatórias e ≥3000 chars | PENDENTE |
-| W3-02 | ReportGenerator | Montagem do relatório final com fallback (dump do ValidationBoard se Synthesizer falhar) | `core/report_generator.py` | Teste: fallback gera relatório mínimo preservando 100% dos dados | PENDENTE |
-| W3-03 | Controller refatorado | Pipeline simplificado: Round 0 → Debate → Síntese → Persistência | `core/controller.py` | Teste integração: pipeline completo com MockProvider sem crash | PENDENTE |
-| W3-04 | CLI simplificada | Entry point com flags --idea, --constraint, --interactive, --model | `cli/main.py` | CLI funcional em ≤3 comandos para primeira execução | PENDENTE |
-| W3-05 | Smoke test real | Execução completa com gpt-oss:20b-cloud, validação de relatório | `tests/smoke/` | 3 execuções consecutivas sem crash, relatório legível e coerente | PENDENTE |
+| W3-01 | SynthesizerAgent | Juíza neutra que recebe quadro de validações e gera relatório em Markdown | `src/agents/synthesizer_agent.py` | Teste com MockProvider: relatório tem Executive Summary, Riscos e Decisões | PENDENTE |
+| W3-02 | ReportGenerator | Montagem do relatório final com fallback (dump do ValidationBoard se Synthesizer falhar) | `src/core/report_generator.py` | Teste: fallback gera relatório mínimo preservando 100% dos dados | PENDENTE |
+| W3-03 | Controller refatorado | Pipeline simplificado: Round 0 → Debate → Síntese → Persistência | `src/core/controller.py` | Teste integração: pipeline completo com MockProvider sem crash | PENDENTE |
+| W3-04 | CLI simplificada | Entry point com flags --idea, --interactive, --model | `src/cli/main.py` | CLI funcional em ≤3 comandos para primeira execução | PENDENTE |
+| W3-05 | Smoke test real | Execução completa com modelo real, validação de relatório | `tests/smoke/` | 3 execuções consecutivas sem crash, relatório legível e coerente | PENDENTE |
 
 ### Meta da Onda 3
-- **Critério binário:** `pytest tests/ -v` passa (unitários + integração + smoke) e relatório gerado alimentado a Claude/Gemini produz PRD de qualidade
+- **Critério binário:** `pytest tests/ -v` passa (unitários + integração + smoke) e relatório gerado produz PRD de qualidade se alimentado a outro modelo.
 - **Status:** PENDENTE
 
-### CONTRATOS_DA_ONDA 3
+### CONTRATOS_DA_ONDA 3 [PROPOSTA — aguardando validação do usuário]
 > Este bloco é PROPOSTO PELA IA com base no BACKLOG, CURRENT_STATE e DECISION_LOG.
-> O usuário revisa, corrige o que estiver errado e acrescenta o que a IA não tem como saber.
-> Só disparar o NEXUS após o usuário confirmar a proposta.
-> Campos marcados com [?] são lacunas que a IA não conseguiu inferir — o usuário deve preencher antes de confirmar.
 
 ```yaml
 OUTPUT_SCHEMAS:
+  W3-01: Relatório com seções: # Sumário Executivo, ## Decisões Validadas, ## Issues Pendentes, ## Matriz de Risco, ## Veredito.
+  W3-02: Fallback Dump (Texto plano de todos os registros do Board se o LLM falhar).
 
 ESCOPO_CONGELADO:
+  - src/debate/ (Motor validado na Onda 2)
+  - src/core/validation_board.py
+  - src/core/adaptive_orchestrator.py
 
 ARQUIVOS_A_DELETAR:
+  - src/core/output_validator.py (Legado PRD)
+  - src/core/consistency_checker.py (Legado PRD)
+  - Qualquer referência pendente a "PRD" no código core.
 
 REESCRITAS:
-
-SPECIALISTS_MVP:
+  - src/cli/main.py: TOTAL (Nova interface amigável)
+  - src/core/controller.py: TOTAL (Pipeline simplificado)
 
 DECISOES_EXTRAS:
-
+  - O SynthesizerAgent deve ser proibido de inventar dados: se não está no Board, não está no relatório.
+  - Implementar flag `--debug` na CLI para expor o transcript e o board JSON.
 ```
 
 ---
@@ -142,7 +86,5 @@ DECISOES_EXTRAS:
 ## Regras do Backlog
 1. Itens movem de `PENDENTE` para `CONCLUÍDO` apenas após validação com critério binário
 2. Nenhuma Onda inicia sem a anterior concluída
-3. Novas técnicas descobertas durante implementação são adicionadas como item novo na Onda apropriada
-4. `CONTRATOS_DA_ONDA` deve estar confirmado pelo usuário antes de disparar o NEXUS — nunca durante
-5. A IA propõe o `CONTRATOS_DA_ONDA` — o usuário valida. Campos marcados com [?] exigem resposta do usuário antes da confirmação
-6. Campos que o usuário confirmar sem alteração são tratados pelo NEXUS como fatos — não serão questionados
+3. `CONTRATOS_DA_ONDA` deve estar confirmado pelo usuário antes de disparar o NEXUS — nunca durante
+4. A IA propõe o `CONTRATOS_DA_ONDA` — o usuário valida.

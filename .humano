@@ -65,6 +65,8 @@ PASSO 5 — IA roda os testes novamente
   → pytest tests/integration/ -v → TODOS PASSAM ✅
 
 PASSO 6 — VOCÊ valida (roda os testes, executa manualmente)
+  pytest --collect-only -v
+  pytest tests/ -v --color=yes
 
 PASSO 7 — VOCÊ diz à IA:
   "Fase N concluída e validada.

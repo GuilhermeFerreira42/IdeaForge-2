@@ -71,3 +71,16 @@ F1 | ADD | ConvergenceDetector usando Similaridade Jaccard (bag-of-words) com st
 F1 | ADD | ConvergenceDetector rastreia Stale Rounds (saturação de issues) | Saturação pode ocorrer sem repetição textual exata; 2 rounds seguidos sem issues novos forçam parada | core/convergence_detector.py
 F1 | ADD | AdaptiveOrchestrator com regras rígidas (MAX_ROUNDS, MIN_ROUNDS, SPAWN, CONVERGENCE) | Garantir que o Cérebro do sistema seja 100% determinístico e controlável | core/adaptive_orchestrator.py
 F1 | RULE | Ordem de Avaliação no Orchestrator (STOP Force > CONTINUE Force > SPAWN > CONVERGE > CONTINUE) | Prevenir intersecções lógicas como tentar spawnar agentes num estado convergido | core/adaptive_orchestrator.py
+
+### Fase 2 — Agentes e Motor de Debate
+
+F2 | ADD | prompt_templates.py centraliza diretivas e contratos de formato | Garantir consistência nas instruções de todos os agentes e facilitar manutenção | src/core/prompt_templates.py
+F2 | ADD | RoundExecutor decompõe o loop do debate | Evitar God Class em DebateEngine; responsabilidade única por execução de turno | src/debate/round_executor.py
+F2 | ADD | ContextBuilder com política de truncamento determinística (≤3000 chars) | Evitar estouro de budget de prompt em modelos pequenos; priorização fixa de conteúdo | src/debate/context_builder.py
+F2 | ADD | Pipeline de Canonicalização (PT->EN e ID fake) no RoundExecutor | Suportar output real de LLM sem quebrar tracker legacy da Onda 1; normalizar severidade e categoria | src/debate/round_executor.py
+F2 | ADD | ApplyDefensePatches com match fuzzy de seções | Permitir evolução contínua da proposta arquitetural baseada nas defesas do Proponent | src/debate/round_executor.py
+F2 | MOD | ProponentAgent refatorado para modos Expansão (7 seções) e Defesa | Implementar Round 0 produtivo e resposta direta a issues | src/agents/proponent_agent.py
+F2 | ADD | SpecialistProfiles com banco de perfis (Security, Scalability, etc) | Habilitar spawning dinâmico de auditores técnicos sob demanda | src/agents/specialist_profiles.py
+F2 | FIX | DetectSubextraction mapeia resposta longa + 0 issues para falha de parsing | Evitar "falsa convergência" quando o modelo descreve problemas mas falha na tabela | src/debate/round_executor.py
+F2 | MOD | DebateEngine integrado com fluxos de Round 0 e Spawn de Especialista | Coordenar o pipeline completo de validação ponto a ponto | src/debate/debate_engine.py
+F2 | MOD | ValidationBoard sincronizado com todos os métodos de prompt da Onda 2 | Suportar integração via ContextBuilder sem violar contratos pré-existentes | src/core/validation_board.py
