@@ -54,8 +54,7 @@
 - **Critério binário:** `pytest tests/ -v` passa (unitários + integração + smoke) e relatório gerado produz PRD de qualidade se alimentado a outro modelo.
 - **Status:** PENDENTE
 
-### CONTRATOS_DA_ONDA 3 [PROPOSTA — aguardando validação do usuário]
-> Este bloco é PROPOSTO PELA IA com base no BACKLOG, CURRENT_STATE e DECISION_LOG.
+### CONTRATOS_DA_ONDA 3 [CONFIRMADO]
 
 ```yaml
 OUTPUT_SCHEMAS:
@@ -67,14 +66,11 @@ ESCOPO_CONGELADO:
   - src/core/validation_board.py
   - src/core/adaptive_orchestrator.py
 
-ARQUIVOS_A_DELETAR:
-  - src/core/output_validator.py (Legado PRD)
-  - src/core/consistency_checker.py (Legado PRD)
-  - Qualquer referência pendente a "PRD" no código core.
+NOVOS:
+  - src/cli/main.py: NOVO
+  - src/core/controller.py: NOVO
 
-REESCRITAS:
-  - src/cli/main.py: TOTAL (Nova interface amigável)
-  - src/core/controller.py: TOTAL (Pipeline simplificado)
+SPECIALISTS_MVP: Resolvido na Onda 2 — Security, Scalability, Feasibility, Completeness implementados em src/agents/specialist_profiles.py
 
 DECISOES_EXTRAS:
   - O SynthesizerAgent deve ser proibido de inventar dados: se não está no Board, não está no relatório.
