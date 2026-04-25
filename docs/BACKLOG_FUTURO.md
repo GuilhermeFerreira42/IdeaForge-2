@@ -75,6 +75,9 @@ SPECIALISTS_MVP: Resolvido na Onda 2 — Security, Scalability, Feasibility, Com
 DECISOES_EXTRAS:
   - O SynthesizerAgent deve ser proibido de inventar dados: se não está no Board, não está no relatório.
   - Implementar flag `--debug` na CLI para expor o transcript e o board JSON.
+  - O campo do transcript no DebateResult chama-se `transcript` (List[Dict[str,str]] com keys `role` e `content`), NÃO `debate_transcript`. Controller e CLI devem usar `result.transcript`.
+  - `idea-forge/src/` permanece congelado e não é tocado nesta fase. Legado v1 será tratado separadamente.
+  - `pytest tests/smoke/ -v` nunca é incluído no comando padrão `pytest tests/ -v`. Smoke tests rodam apenas quando invocados explicitamente.
 ```
 
 ---

@@ -27,7 +27,8 @@ ANTES DE INICIAR UMA ONDA:
   1. Peça à IA:
      "Com base no BACKLOG_FUTURO.md, CURRENT_STATE.md e DECISION_LOG.md,
       proponha o CONTRATOS_DA_ONDA para a Onda N."
-
+      "Revise o documento e me diga se há algo que precisa de ajuste antes de iniciar a implementação."
+      
   2. A IA irá propor todos os campos:
      OUTPUT_SCHEMAS, ESCOPO_CONGELADO, ARQUIVOS_A_DELETAR,
      REESCRITAS, SPECIALISTS_MVP, DECISOES_EXTRAS
