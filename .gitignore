@@ -30,3 +30,7 @@ VALIDACAO_PAYLOAD_*/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Logs e Arquivos Locais do Usuário
+*.log
+log_*.txt
