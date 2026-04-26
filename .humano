@@ -99,3 +99,6 @@ QUANDO TESTES NÃO EXISTIREM ANTES DO CÓDIGO
   A IA não deve implementar código de produção sem testes.
   Sequência: testes → falha → código → testes passam.
   Esta regra tem precedência sobre velocidade de entrega.
+
+
+Revise o documento e me diga se há algo que precisa de ajuste antes de iniciar a implementação.
