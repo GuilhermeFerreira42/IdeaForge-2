@@ -50,3 +50,19 @@ F5 | ADD | CLI com argparse e modo debug | Interface robusta stdlib-only com vis
 F5 | FIX | Corrigido nome de campo do transcript na integração do Controller | Alinhar com campo `transcript` real do DebateResult dataclass | src/core/controller.py
 F5 | CFG | Restauração de OllamaProvider, CloudProvider e StreamHandler | Reabilitar execução real, streaming e telemetria v1 | src/models/, src/core/stream_handler.py
 F5 | CFG | Adicionadas constantes de orquestração v2 em settings.py | Centralizar thresholds e limites de convergência do sistema | src/config/settings.py
+
+### Hotfix F3-HF01 — Robustez e Seleção Interativa
+F5 | FIX | OllamaProvider.generate() não mais engole erros — exceções tipadas propagam | Debate rodava com string de erro como resposta do LLM | src/models/ollama_provider.py
+F5 | FIX | Controller._get_provider() corrigido: model_name= em vez de model= | TypeError ao instanciar OllamaProvider | src/core/controller.py
+F5 | ADD | OllamaMemoryError e OllamaServiceError como exceções tipadas | Permitir tratamento diferenciado na CLI | src/models/ollama_provider.py
+F5 | ADD | OllamaProvider.list_available_models() via GET /api/tags | Eliminar necessidade de o usuário saber o nome do modelo | src/models/ollama_provider.py
+F5 | ADD | OllamaProvider.check_thinking_support() via subprocess ollama show | Substituir lista de keywords frágil por detecção real de capability | src/models/ollama_provider.py
+F5 | MOD | Controller.run() exige model_name explícito — removido default silencioso | DEFAULT_MODEL="llama3" causava erro por modelo não instalado | src/core/controller.py
+F5 | MOD | CLI reescrita com fluxo interativo: lista modelos -> verifica thinking -> coleta ideia | Experiência de uso sem necessidade de conhecer flags ou nomes de modelos | src/cli/main.py
+F5 | RULE | OllamaMemoryError na CLI volta para seleção de modelo em vez de encerrar | Permitir que o usuário escolha modelo menor sem reiniciar o sistema | src/cli/main.py
+
+### Hotfix F3-HF02 — Parser de Issues, Raciocínio e Validação de Relatório
+F3 | FIX | _canonicalize_table() gera ID único por hash em vez de ISS-000 fixo | Deduplicação rejeitava todos os issues após o primeiro | src/debate/round_executor.py
+F3 | FIX | Controller passa show_thinking=think ao OllamaProvider | Raciocínio aparecia mesmo com think=False | src/core/controller.py
+F3 | FIX | ReportGenerator threshold corrigido para < 5 seções obrigatórias | Relatório incompleto era aceito como válido | src/core/report_generator.py
+F3 | FIX | SynthesizerAgent prompt instrui uso ativo dos dados do Board | Board não-vazio gerava (Nenhum registro) por interpretação excessivamente restritiva | src/agents/synthesizer_agent.py

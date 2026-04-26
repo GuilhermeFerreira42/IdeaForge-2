@@ -24,9 +24,10 @@ class ReportGenerator:
         
         synth_result = synthesizer.synthesize(board, idea_title, provider)
         
-        # Lógica de Fallback (ADR-W3-02 + COR-15)
-        # Falha se status="error" OU se tiver < 3 seções obrigatórias
-        if synth_result["status"] == "error" or len(synth_result.get("sections_present", [])) < 3:
+        # Lógica de Fallback (ADR-W3-02 + COR-15 + HF02)
+        # Falha se status="error" OU se tiver < 5 seções obrigatórias
+        REQUIRED_SECTIONS = 5
+        if synth_result["status"] == "error" or len(synth_result.get("sections_present", [])) < REQUIRED_SECTIONS:
             logger.warning(f"SynthesizerAgent falhou ou gerou relatório incompleto. Acionando fallback.")
             report_markdown = self._fallback_dump(board, idea_title)
             fallback_used = True

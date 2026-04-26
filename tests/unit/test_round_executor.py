@@ -68,3 +68,47 @@ def test_execute_defense_round_with_patches():
     
     assert "Nova visão" in result.updated_proposal
     assert "Original" in result.updated_proposal # Estratégia é APPEND para manter rastro
+
+def test_canonicalize_table_generates_unique_ids():
+    """BUG-A: Verifica se cada linha da tabela recebe um ID único."""
+    board = ValidationBoard()
+    tracker = DebateStateTracker()
+    builder = ContextBuilder(board=board)
+    executor = RoundExecutor(provider=MagicMock(), board=board, tracker=tracker, builder=builder)
+    
+    raw_table = (
+        "| HIGH | SEC | Erro 1 | Fix 1 |\n"
+        "| MED | FEAT | Erro 2 | Fix 2 |\n"
+        "| LOW | COMP | Erro 3 | Fix 3 |"
+    )
+    
+    canonical = executor._canonicalize_table(raw_table)
+    
+    # Extrair os IDs (ISS-XXXX)
+    import re
+    ids = re.findall(r"ISS-\d+", canonical)
+    
+    assert len(ids) == 3
+    assert len(set(ids)) == 3 # Todos únicos
+    assert "ISS-000" not in ids
+
+def test_execute_critic_round_registers_multiple_issues():
+    """BUG-A: Verifica se múltiplos issues são registrados no board após canonicalização."""
+    board = ValidationBoard()
+    tracker = DebateStateTracker()
+    builder = ContextBuilder(board=board)
+    
+    mock_response = (
+        "## Issues\n"
+        "| HIGH | SEC | Problema A | Sugestão A |\n"
+        "| MED | PERF | Problema B | Sugestão B |"
+    )
+    provider = MockProvider(responses={"critic": mock_response})
+    executor = RoundExecutor(provider=provider, board=board, tracker=tracker, builder=builder)
+    
+    executor.execute_critic_round(current_proposal="P1", last_defense="D1", round_num=1)
+    
+    # Se a canonicalização falhar (IDs duplicados), o tracker/board só registrará 1 issue
+    assert len(board.get_open_issues()) == 2
+
+from unittest.mock import MagicMock

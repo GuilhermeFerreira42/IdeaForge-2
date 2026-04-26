@@ -27,18 +27,28 @@
 
 ### Meta da Onda 3
 - **Critério binário:** `pytest tests/ -v` passa (unitários + integração) e relatório gerado preserva dados do board.
-- **Status:** CONCLUÍDO
+- **Status:** CONCLUÍDO (Incluindo Hotfixes HF01 e HF02)
 
 ---
 
-## Próximos Passos (Legacy Migration / Optimization) [PROPOSTA]
+## Onda 4 — Refinamento, Performance e Migração Legacy (Fase 6) [PROPOSTA]
 
-A Onda 3 conclui o MVP do IdeaForge 2 (Debate-Only). A partir daqui, as sugestões são de manutenção e expansão:
+A Onda 3 concluiu o MVP do IdeaForge 2 (Debate-Only). A Onda 4 foca em otimização de custos (cache), limpeza definitiva do legado e interface amigável.
 
-### Onda 4 — Refinamento e Performance (Opcional)
-- **W4-01**: Cache de inferência para rounds idênticos.
-- **W4-02**: Migração definitiva dos arquivos legados remanescentes em `idea-forge/src/`.
-- **W4-03**: Interface Web (Gradio/Streamlit) para visualização do Board em tempo real.
+### CONTRATOS_DA_ONDA 4 [PROPOSTA — aguardando validação do usuário]
+
+| Contrato | Responsabilidade | Status |
+| :--- | :--- | :--- |
+| `src/core/cache_manager.py` | [NOVO] Cache de inferência persistente para evitar rounds redundantes | PENDENTE |
+| `src/ui/dashboard.py` | [NOVO] Dashboard Gradio para visualização em tempo real do Board | PENDENTE |
+| `idea-forge/src/` | [DELETE] Remoção completa do diretório legado após migração de utilitários | PENDENTE |
+
+### Itens de Trabalho (Backlog Onda 4)
+| ID | Técnica/Feature | Descrição | Status |
+|---|---|---|---|
+| W4-01 | Cache de inferência | Implementar cache baseado em hash de prompt para economizar tokens | PENDENTE |
+| W4-02 | Migração Total | Mover utilitários remanescentes e deletar pasta `idea-forge/` | PENDENTE |
+| W4-03 | Visual Dashboard | Criar interface visual para acompanhar o progresso dos agentes | PENDENTE |
 
 ---
 

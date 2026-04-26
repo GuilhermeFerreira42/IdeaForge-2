@@ -1,6 +1,7 @@
 import requests
 import json
 import sys
+import subprocess
 from typing import Optional
 from src.models.model_provider import ModelProvider, GenerationResult
 from src.config.settings import OLLAMA_ENDPOINT, MODEL_NAME
@@ -18,6 +19,13 @@ DIRECT_RESPONSE_DIRECTIVE = (
 # da flag think: false + diretiva de supressão
 REASONING_MODEL_KEYWORDS = ["qwen", "deepseek", "r1", "reasoning"]
 
+class OllamaMemoryError(Exception):
+    """Disparada quando o Ollama rejeita o modelo por memória insuficiente."""
+    pass
+
+class OllamaServiceError(Exception):
+    """Disparada quando o Ollama está offline ou inacessível."""
+    pass
 
 class OllamaProvider(ModelProvider):
     """
@@ -37,11 +45,32 @@ class OllamaProvider(ModelProvider):
             kw in model_name.lower() for kw in REASONING_MODEL_KEYWORDS
         )
 
+    @staticmethod
+    def list_available_models() -> list[dict]:
+        """Lista modelos disponíveis no Ollama local."""
+        try:
+            response = requests.get(f"{OLLAMA_ENDPOINT.replace('/api/generate', '/api/tags')}", timeout=5)
+            response.raise_for_status()
+            return response.json().get("models", [])
+        except Exception as e:
+            raise OllamaServiceError(f"Ollama está offline ou inacessível: {e}")
+
+    @staticmethod
+    def check_thinking_support(model_name: str) -> bool:
+        """Verifica se o modelo suporta a capacidade 'thinking' via ollama show."""
+        try:
+            result = subprocess.run(["ollama", "show", model_name], capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                return False
+            # Procura por 'thinking' no campo Capabilities (heurística robusta)
+            return "thinking" in result.stdout.lower()
+        except:
+            return False
+
     def generate(self, prompt: str, context: list = None, 
                  role: str = "user", max_tokens: Optional[int] = None) -> str:
         """
         Gera resposta e retorna apenas o conteúdo limpo (sem pensamento).
-        Mantém compatibilidade com contrato original.
         """
         result = self.generate_with_thinking(prompt, context, role, max_tokens=max_tokens)
         return result.content
@@ -92,7 +121,7 @@ class OllamaProvider(ModelProvider):
             # Emitir estado: início da geração
             mode_label = "reasoning" if self.think else "direto"
             sys.stdout.write(
-                f"{ANSIStyle.CYAN}⏳ Gerando com {self.model_name} "
+                f"{ANSIStyle.CYAN}[Ollama] Gerando com {self.model_name} "
                 f"(modo {mode_label})...{ANSIStyle.RESET}\n"
             )
             sys.stdout.flush()
@@ -102,19 +131,46 @@ class OllamaProvider(ModelProvider):
             )
             response.raise_for_status()
 
-            # Delegar processamento ao StreamHandler
-            handler = StreamHandler(show_thinking=self.show_thinking)
-            result = handler.process_ollama_stream(response.iter_lines())
+            # Inspecionar primeiro chunk para capturar erros explícitos do Ollama (Fase 3-HF)
+            line_iterator = response.iter_lines()
+            first_line = next(line_iterator, None)
+            
+            if first_line:
+                try:
+                    first_data = json.loads(first_line.decode('utf-8'))
+                    error_msg = first_data.get("error")
+                    if error_msg:
+                        if "memory" in error_msg.lower():
+                            raise OllamaMemoryError(f"Erro de memória no Ollama: {error_msg}")
+                        raise OllamaServiceError(f"Erro reportado pelo Ollama: {error_msg}")
+                    
+                    # Se não é erro, devolver a linha para o iterador (re-preparar para o StreamHandler)
+                    def line_generator():
+                        yield first_line
+                        yield from line_iterator
+                        
+                    # Delegar processamento ao StreamHandler
+                    handler = StreamHandler(show_thinking=self.show_thinking)
+                    result = handler.process_ollama_stream(line_generator())
+                    
+                    return GenerationResult(
+                        content=result.content,
+                        thinking=result.thinking,
+                        raw=result.raw
+                    )
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    # Se não é JSON válido, tenta processar normalmente (improvável no primeiro chunk)
+                    handler = StreamHandler(show_thinking=self.show_thinking)
+                    result = handler.process_ollama_stream(line_iterator)
+                    return GenerationResult(content=result.content, thinking="", raw=result.raw)
 
-            return GenerationResult(
-                content=result.content,
-                thinking=result.thinking,
-                raw=result.raw
-            )
+            return GenerationResult(content="", thinking="", raw="")
 
-        except requests.exceptions.RequestException as e:
-            error_msg = f"Error communicating with Ollama: {str(e)}"
-            return GenerationResult(content=error_msg, thinking="", raw=error_msg)
+        except (requests.exceptions.RequestException, OllamaMemoryError, OllamaServiceError):
+            # Re-disparar exceções conhecidas ou de rede para o Controller tratar
+            raise
+        except Exception as e:
+            raise OllamaServiceError(f"Erro inesperado na comunicação com Ollama: {e}")
 
     def _build_prompt(self, original_prompt: str) -> str:
         """

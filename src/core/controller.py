@@ -10,7 +10,7 @@ from src.debate.context_builder import ContextBuilder
 from src.core.validation_board import ValidationBoard
 from src.agents.synthesizer_agent import SynthesizerAgent
 from src.core.report_generator import ReportGenerator
-from src.models.ollama_provider import OllamaProvider
+from src.models.ollama_provider import OllamaProvider, OllamaMemoryError, OllamaServiceError
 from src.config import settings
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ class Controller:
         self.synthesizer = SynthesizerAgent()
         self.generator = ReportGenerator()
 
-    def run(self, idea: str, model_override: str | None = None, debug: bool = False) -> Dict[str, Any]:
+    def run(self, idea: str, model_name: str, think: bool = False, debug: bool = False) -> Dict[str, Any]:
         """
         Executa o fluxo completo do sistema.
         """
@@ -34,15 +34,24 @@ class Controller:
             return {"status": "error", "error": "Ideia não pode ser vazia"}
 
         # 1. Setup
-        provider = self._get_provider(model_override)
-        board = ValidationBoard()
-        builder = ContextBuilder(board)
-        engine = DebateEngine(provider, board, self.tracker, builder)
+        try:
+            provider = self._get_provider(model_name, think)
+            board = ValidationBoard()
+            builder = ContextBuilder(board)
+            engine = DebateEngine(provider, board, self.tracker, builder)
+        except OllamaMemoryError as e:
+            return {"status": "memory_error", "error": f"Memória insuficiente no Ollama: {e}"}
+        except OllamaServiceError as e:
+            return {"status": "error", "error": f"Erro no serviço Ollama: {e}"}
+        except Exception as e:
+            return {"status": "error", "error": f"Erro de inicialização: {e}"}
 
         # 2. Executa Debate
         logger.info(f"Iniciando debate para a ideia: '{idea}'")
         try:
             debate_result = engine.run_debate(idea)
+        except OllamaMemoryError as e:
+            return {"status": "memory_error", "error": f"Memória insuficiente durante o debate: {e}"}
         except Exception as e:
             logger.error(f"Falha catastrófica no motor de debate: {e}")
             return {"status": "error", "error": f"Debate Engine failure: {e}"}
@@ -71,13 +80,12 @@ class Controller:
             "debate_rounds": debate_result.stats.get("total_rounds", 0),
             "issues_total": debate_result.stats.get("issues_raised", 0),
             "fallback_used": report_result["fallback_used"],
-            "model_used": model_override or settings.DEFAULT_MODEL
+            "model_used": model_name
         }
 
-    def _get_provider(self, model_override: Optional[str]) -> OllamaProvider:
+    def _get_provider(self, model_name: str, think: bool) -> OllamaProvider:
         """Instancia o provedor de modelo."""
-        model = model_override or settings.DEFAULT_MODEL
-        return OllamaProvider(model=model)
+        return OllamaProvider(model_name=model_name, think=think, show_thinking=think)
 
     def _get_output_path(self, idea_title: str) -> str:
         """Gera o nome do arquivo com timestamp conforme ADR-W3-05."""

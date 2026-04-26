@@ -3,6 +3,7 @@ import os
 from src.core.report_generator import ReportGenerator
 from src.agents.synthesizer_agent import SynthesizerAgent
 from src.core.validation_board import ValidationBoard, IssueRecord, DecisionRecord
+from unittest.mock import patch, MagicMock
 from tests.conftest import MockProvider
 
 class MockSynthesizer:
@@ -23,6 +24,13 @@ class MockSynthesizer:
             "status": "success",
             "report_markdown": "# Sumário Executivo\n## Decisões Validadas\n## Issues Pendentes\n## Matriz de Risco\n## Veredito",
             "sections_present": ["# Sumário Executivo", "## Decisões Validadas", "## Issues Pendentes", "## Matriz de Risco", "## Veredito"]
+        }
+    
+    def synthesize_with_4_sections(self):
+        return {
+            "status": "success",
+            "report_markdown": "# S1\n## S2\n## S3\n## S4",
+            "sections_present": ["# S1", "## S2", "## S3", "## S4"]
         }
 
 def test_report_generator_success_path(tmp_path):
@@ -67,6 +75,23 @@ def test_report_generator_fallback_on_invalid_report(tmp_path):
     result = gen.generate(board, synth, "Invalido", str(out_file), None)
     
     assert result["fallback_used"] is True
+
+def test_report_generator_fallback_on_4_sections(tmp_path):
+    """BUG-C: Verifica se dispara fallback com 4 seções (agora exigimos 5)."""
+    board = ValidationBoard()
+    synth = MagicMock()
+    synth.synthesize.return_value = {
+        "status": "success",
+        "report_markdown": "# S1\n## S2\n## S3\n## S4",
+        "sections_present": ["# S1", "## S2", "## S3", "## S4"]
+    }
+    gen = ReportGenerator()
+    out_file = tmp_path / "fallback_4_sections.md"
+    
+    result = gen.generate(board, synth, "4 Seções", str(out_file), None)
+    
+    assert result["fallback_used"] is True
+    assert result["source"] == "fallback"
 
 def test_fallback_dump_preserves_all_records():
     """Garante que o dump contém todos os IDs do board."""

@@ -68,3 +68,11 @@ def test_synthesizer_build_prompt_contains_snapshot():
     assert "Snapshot Test" in prompt
     # Verifica se parece JSON
     assert '"issue_id": "ISS-01"' in prompt
+
+def test_synthesizer_prompt_contains_use_data_instruction():
+    """BUG-D: Verifica se o prompt contém a instrução de uso ativo dos dados (HF02)."""
+    agent = SynthesizerAgent()
+    prompt = agent._build_prompt({}, "Instruction Test")
+    
+    assert "USE esses dados para preencher as seções" in prompt
+    assert "NUNCA deve gerar \"(Nenhum registro)\" em Issues ou Decisões" in prompt

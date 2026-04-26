@@ -1,5 +1,6 @@
 import re
 import logging
+import hashlib
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -48,7 +49,7 @@ class RoundExecutor:
     def _canonicalize_table(self, text: str) -> str:
         """
         Normaliza tabelas Markdown para o parser v1 (L1/L2) [COR-11].
-        - Adiciona ID fake (ISS-NEW) para manter compatibilidade com tracker Onda 1.
+        - Adiciona ID único baseado em hash para evitar deduplicação indevida (HF02).
         - Mapeia severidades/categorias PT->EN.
         """
         lines = text.split('\n')
@@ -60,9 +61,15 @@ class RoundExecutor:
                 if len(cols) == 4: # Formato Novo: Sev | Cat | Desc | Sug
                     sev = prompt_templates.PT_EN_NORMALIZATION_MAP.get(cols[0].upper(), cols[0].upper())
                     cat = prompt_templates.PT_EN_NORMALIZATION_MAP.get(cols[1].upper(), cols[1].upper())
-                    desc_sug = f"{cols[2]} (Sugere-se: {cols[3]})"
+                    description = cols[2]
+                    suggestion = cols[3]
+                    desc_sug = f"{description} (Sugere-se: {suggestion})"
+                    
+                    # BUG-A FIX: Gerar ID único por linha usando hash da descrição
+                    unique_id = f"ISS-{abs(hash(description[:100])) % 9000 + 1000}"
+                    
                     # Converte para formato compatível com Tracker Onda 1: | ISS-XX | SEV | CAT | DESC |
-                    new_lines.append(f"| ISS-000 | {sev} | {cat} | {desc_sug} |")
+                    new_lines.append(f"| {unique_id} | {sev} | {cat} | {desc_sug} |")
                     continue
             new_lines.append(line)
         return "\n".join(new_lines)

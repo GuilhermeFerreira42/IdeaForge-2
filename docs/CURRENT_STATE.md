@@ -9,9 +9,9 @@
 
 | Fase | Onda | Foco | Status |
 | :--- | :--- | :--- | :--- |
-| Fase 5 | Onda 3 | Síntese, Relatório e CLI | ✅ Concluída |
+| Fase 5 | Onda 3 | Síntese, Relatório e CLI | ✅ Concluída (HF01/HF02 ok) |
 
-**Estado**: Pronto para Uso (CLI ativa)
+**Estado**: Produção Robusta (Parsing Variado e Fidelidade de Relatório ok)
 
 ---
 
@@ -20,17 +20,17 @@
 | Módulo | Caminho | Status |
 | :--- | :--- | :--- |
 | CLI / Entry Point | `src/cli/main.py` | ✅ Operacional |
-| Controller | `src/core/controller.py` | ✅ Operacional |
-| Debate Engine | `src/debate/debate_engine.py` | ✅ Congelado |
-| Context Builder | `src/debate/context_builder.py` | ✅ Congelado |
-| Validation Board | `src/core/validation_board.py` | ✅ Congelado |
-| Synthesizer Agent | `src/agents/synthesizer_agent.py` | ✅ Operacional |
-| Report Generator | `src/core/report_generator.py` | ✅ Operacional |
-| Model Providers | `src/models/*.py` | ✅ Operacional |
+| Controller | `src/core/controller.py` | ✅ Sincronizado |
+| Debate Engine | `src/debate/debate_engine.py` | ✅ Estável |
+| Context Builder | `src/debate/context_builder.py` | ✅ Estável |
+| Validation Board | `src/core/validation_board.py` | ✅ Estável |
+| Synthesizer Agent | `src/agents/synthesizer_agent.py` | ✅ Prompt Corrigido |
+| Report Generator | `src/core/report_generator.py` | ✅ Threshold 5 |
+| Model Providers | `src/models/*.py` | ✅ Robusto |
 
 ---
 
 ## ✅ Cobertura de Testes
-- **Total:** 106 testes
+- **Total:** 119 testes
 - **Status:** 100% Sucesso (Unitários + Integração)
 - **Comando:** `pytest tests/unit/ tests/integration/ -v`

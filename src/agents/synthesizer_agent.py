@@ -61,6 +61,7 @@ class SynthesizerAgent:
 
 REGRAS INVIOLÁVEIS:
 1. Se uma informação não está em BOARD_SNAPSHOT, ela NÃO existe — não a invente.
+   ATENÇÃO: O BOARD_SNAPSHOT contém os dados reais do debate — issues encontrados, decisões tomadas e pressupostos identificados. USE esses dados para preencher as seções. Um board não-vazio NUNCA deve gerar "(Nenhum registro)" em Issues ou Decisões.
 2. Não expresse opinião pessoal. Registre apenas o que o debate produziu.
 3. O relatório DEVE conter EXATAMENTE estas 5 seções, nesta ordem:
    - # Sumário Executivo

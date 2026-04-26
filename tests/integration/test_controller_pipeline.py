@@ -29,7 +29,7 @@ def test_controller_pipeline_integration(tmp_path):
         ctrl = Controller()
         # Forçamos o output_path para o tmp_path
         with patch.object(ctrl, "_get_output_path", return_value=str(tmp_path / "final_report.md")):
-            result = ctrl.run("Startup de IA")
+            result = ctrl.run("Startup de IA", model_name="mock-model")
             
             assert result["status"] == "success"
             assert os.path.exists(result["output_path"])
