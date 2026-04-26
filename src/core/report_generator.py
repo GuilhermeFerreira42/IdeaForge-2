@@ -61,12 +61,21 @@ class ReportGenerator:
         """
         snapshot = board.snapshot()
         stats = board.get_stats()
+        # Tenta usar seções de relatório do profile para estruturar o dump
+        profile = board.get_domain_profile()
+        sections_str = ""
+        if profile and profile.report_sections:
+             sections_str = "\n".join([f"## {s.title}" for s in profile.report_sections])
         
         lines = [
             f"# Relatório de Validação — IdeaForge (Fallback Automático)",
+            f"> Domínio Detectado: {profile.domain.upper() if profile else 'GENERIC'}",
             f"> Gerado por fallback determinístico. O SynthesizerAgent falhou.",
             f"",
             f"**Ideia Analisada:** {idea_title}",
+            f"",
+            f"## Estrutura do Relatório",
+            sections_str if sections_str else "*(Seções de relatório padrão aplicadas)*",
             f"",
             f"## Estatísticas do Debate",
             f"- Issues Totais: {stats['total_issues']}",
@@ -74,7 +83,7 @@ class ReportGenerator:
             f"- Decisões Validadas: {stats['validated_decisions']} / {stats['total_decisions']}",
             f"- Pressupostos: {stats['total_assumptions']} ({stats['untested_assumptions']} pendentes)",
             f"",
-            f"## Issues Encontrados",
+            f"## Issues Encontrados (Arquivamento)",
         ]
         
         for issue_id, issue in snapshot["issues"].items():

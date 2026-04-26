@@ -10,6 +10,8 @@ from src.debate.round_executor import RoundExecutor
 from src.core.adaptive_orchestrator import AdaptiveOrchestrator
 from src.core.convergence_detector import ConvergenceDetector
 from src.agents.specialist_profiles import build_specialist_prompt, get_profile
+from src.agents.specialist_factory import SpecialistFactory
+from src.core.dynamic_prompt_builder import DynamicPromptBuilder
 from src.config.settings import MAX_ROUNDS, MIN_ROUNDS
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,12 @@ class DebateEngine:
             max_rounds=max_rounds,
             min_rounds=min_rounds
         )
+        
+        # [ONDA 4] Inicialização Dinâmica
+        self.profile = board.get_domain_profile()
+        self.prompt_builder = DynamicPromptBuilder(board, self.profile)
+        self.specialist_factory = SpecialistFactory(self.profile, self.prompt_builder, provider)
+        
         self.transcript = []
 
     def _log_round(self, role: str, text: str):
@@ -61,7 +69,9 @@ class DebateEngine:
         # Round 0: Expansão (se necessário)
         if not idea_or_proposal.startswith("# 1."):
             logger.info("[DebateEngine] Iniciando Round 0: Expansão")
-            current_proposal = self.executor.proponent.expand(idea_or_proposal)
+            # [ONDA 4] Usando PromptBuilder Dinâmico
+            expansion_prompt = self.prompt_builder.build_expansion_prompt(idea_or_proposal)
+            current_proposal = self.provider.generate(prompt=expansion_prompt, role="proponent")
             self._log_round("proponent_expansion", current_proposal)
             
         current_round = 1
@@ -94,24 +104,25 @@ class DebateEngine:
                 break
                 
             if decision.action == "SPAWN":
-                # Turno de Especialista [COR-05]
+                # Turno de Especialista [ONDA 4: DINÂMICO]
                 logger.info(f"[DebateEngine] Spawning especialist: {decision.category}")
-                profile = get_profile(decision.category)
-                if profile:
-                    spec_prompt = build_specialist_prompt(
-                        category=decision.category,
-                        open_issues=self.board.get_open_issues_for_critic_prompt(),
-                        current_proposal=current_proposal,
-                        last_defense=last_defense
-                    )
-                    spec_text = self.provider.generate(prompt=spec_prompt, role="specialist")
-                    self._log_round(f"specialist_{decision.category}_r{current_round}", spec_text)
-                    # Extrair issues do especialista
-                    self.tracker.extract_issues_from_critique(
-                        self.executor._canonicalize_table(spec_text),
-                        current_round,
-                        self.board
-                    )
+                specialist = self.specialist_factory.create_specialist(decision.category)
+                spec_text = specialist.act(
+                    idea=idea_or_proposal,
+                    current_proposal=current_proposal,
+                    open_issues=self.board.get_open_issues_for_critic_prompt()
+                )
+                self._log_round(f"specialist_{decision.category}_r{current_round}", spec_text)
+                
+                # Extrair issues do especialista
+                self.tracker.extract_issues_from_critique(
+                    self.executor._canonicalize_table(spec_text),
+                    current_round,
+                    self.board
+                )
+                
+                # [ONDA 4] Registrar o spawn no orquestrador
+                self.orchestrator.register_spawn(decision.category)
             
             # 3. Turno de Defesa
             defense_result = self.executor.execute_defense_round(

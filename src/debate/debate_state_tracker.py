@@ -7,6 +7,7 @@ from src.core.validation_board import (
     DecisionRecord,
     AssumptionRecord
 )
+from src.core.category_normalizer import CategoryNormalizer
 
 STOPWORDS_PT: Set[str] = {
     "o", "a", "de", "que", "para", "com", "em", "é", "um", "uma",
@@ -41,7 +42,43 @@ class DebateStateTracker:
         words = [w for w in words if w not in STOPWORDS_PT]
         return ' '.join(words)[:40] # Prefixo de 40 chars
     
+    def _parse_v4(self, text: str, round_num: int) -> List[IssueRecord]:
+        """Extrai issues da tabela Markdown de 4 colunas (Onda 4).
+        Formato: | Severidade | Categoria | Descrição | Sugestão |
+        """
+        records = []
+        # Rigor: A severidade deve vir logo após o primeiro pipe da linha (ignora se houver um ID antes)
+        pattern = r'^\|\s*(HIGH|MED|LOW)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|'
+        
+        for line in text.split('\n'):
+            match = re.match(pattern, line.strip())
+            if match:
+                severity = match.group(1).strip()
+                category_raw = match.group(2).strip()
+                description_raw = match.group(3).strip()
+                suggestion = match.group(4).strip()
+                
+                # Pular se for o cabeçalho
+                if severity.lower() == "severidade":
+                    continue
+                
+                # Gerar ID único se não presente (sempre ausente na Onda 4 specialists)
+                issue_id = f"ISS-{hash(description_raw) % 10000:04d}"
+                
+                # A descrição incluirá a sugestão para manter o histórico
+                description = f"{description_raw} (Sugestão: {suggestion})"
+                
+                records.append(IssueRecord(
+                    issue_id=issue_id,
+                    severity=severity,
+                    category=category_raw, # Será normalizado depois
+                    description=description,
+                    round_raised=round_num
+                ))
+        return records
+
     def _parse_level1(self, text: str, round_num: int) -> List[IssueRecord]:
+        # Mantido para retrocompatibilidade com Tabelas de 3 ou 5 colunas de ondas anteriores
         records = []
         pattern = r'\|\s*(ISS-\d+)\s*\|\s*(HIGH|MED|LOW)\s*\|\s*(\w+)\s*\|\s*([^|]+)\|'
         for match in re.finditer(pattern, text):
@@ -104,11 +141,20 @@ class DebateStateTracker:
         return unique_records
 
     def extract_issues_from_critique(self, critique_text: str, round_num: int, board: ValidationBoard) -> List[str]:
-        records = self._parse_level1(critique_text, round_num)
+        # Tenta parse V4 primeiro (Onda 4)
+        records = self._parse_v4(critique_text, round_num)
+        
         if not records:
-            records = self._parse_level2(critique_text, round_num)
+            records = self._parse_level1(critique_text, round_num)
             if not records:
-                records = self._parse_level3(critique_text, round_num)
+                records = self._parse_level2(critique_text, round_num)
+                if not records:
+                    records = self._parse_level3(critique_text, round_num)
+        
+        # [ONDA 4] Normalização de Categorias
+        normalizer = CategoryNormalizer(board.get_domain_profile())
+        for r in records:
+            r.category = normalizer.normalize(r.category)
                 
         records = self._deduplicate(records, board)
         

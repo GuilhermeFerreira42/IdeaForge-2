@@ -4,6 +4,7 @@ import hashlib
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Any, Optional
+from src.core.domain_profile import DomainProfile
 
 class InvalidStateTransitionError(Exception):
     def __init__(self, record_id: str, current: str, attempted: str):
@@ -44,23 +45,72 @@ class AssumptionRecord:
     evidence: str = ""
 
 class ValidationBoard:
-    def __init__(self):
+    def __init__(self, profile: Optional[DomainProfile] = None):
         self._issues: Dict[str, IssueRecord] = {}
         self._decisions: Dict[str, DecisionRecord] = {}
         self._assumptions: Dict[str, AssumptionRecord] = {}
+        self._profile = profile
+        self._validation_schema: Dict[str, Any] = {}
+        
         self._meta: Dict[str, Any] = {
-            "version": "1.0",
+            "version": "1.1",
             "created_at": datetime.now().isoformat(),
             "next_ids": {"issue": 1, "decision": 1, "assumption": 1}
         }
         
+        if profile:
+            self.set_domain_profile(profile)
+        
         # Ensure dir exists
         os.makedirs(".forge", exist_ok=True)
+
+    def set_domain_profile(self, profile: DomainProfile) -> None:
+        """Injeta DomainProfile dinâmico no board."""
+        self._profile = profile
+        self._validation_schema = {
+            dim.id: {
+                "display_name": dim.display_name,
+                "description": dim.description,
+                "spawn_hint": dim.spawn_hint
+            }
+            for dim in profile.validation_dimensions
+        }
+
+    def get_domain_profile(self) -> Optional[DomainProfile]:
+        return self._profile
+
+    def is_valid_category(self, category: str) -> bool:
+        """Verifica se categoria é válida no schema dinâmico."""
+        if not self._validation_schema:
+            return True # Retrocompatibilidade: se sem profile, aceita tudo
+        return category.upper() in self._validation_schema
+
+    def get_open_issues_by_category(self) -> Dict[str, List[IssueRecord]]:
+        """Agrupa issues abertos por categoria."""
+        by_category = {}
+        for issue in self._issues.values():
+            if issue.status == "OPEN":
+                cat = issue.category.upper()
+                if cat not in by_category:
+                    by_category[cat] = []
+                by_category[cat].append(issue)
+        return by_category
+
+    def get_dominant_open_category(self) -> Optional[str]:
+        """Retorna categoria com mais issues abertos."""
+        by_cat = self.get_open_issues_by_category()
+        if not by_cat:
+            return None
+        return max(by_cat.keys(), key=lambda k: len(by_cat[k]))
 
     def add_issue(self, record: IssueRecord) -> None:
         if record.issue_id in self._issues:
             return
         self._issues[record.issue_id] = record
+        
+    def get_issue(self, issue_id: str) -> Optional[IssueRecord]:
+        """Retorna um registro de issue pelo ID."""
+        return self._issues.get(issue_id)
         
     def resolve_issue(self, issue_id: str, round_num: int, resolution: str) -> None:
         issue = self._issues[issue_id]

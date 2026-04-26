@@ -67,7 +67,8 @@ class SilentProgressIndicator:
 
     Ciclo visual: ⣾ ⣽ ⣻ ⢿ ⡿ ⣟ ⣯ ⣷
     """
-    SPINNER_FRAMES = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷']
+    # Ciclo visual adaptado para ASCII básico
+    SPINNER_FRAMES = ['-', '\\', '|', '/']
     # Intervalo mínimo entre atualizações do spinner (em tokens, não tempo)
     # para evitar overhead de sys.stdout.write a cada token
     TOKEN_UPDATE_INTERVAL = 3
@@ -87,7 +88,7 @@ class SilentProgressIndicator:
 
         if not self._header_shown:
             sys.stdout.write(
-                f"{ANSIStyle.GRAY}💭 IA processando internamente "
+                f"{ANSIStyle.GRAY}[IA] processando internamente "
             )
             sys.stdout.flush()
             self._header_shown = True
@@ -106,7 +107,7 @@ class SilentProgressIndicator:
         """Finaliza o indicador quando o conteúdo começa a chegar."""
         if self._is_active:
             sys.stdout.write(
-                f"\b✓ ({self._token_count} tokens processados)"
+                f"\b[OK] ({self._token_count} tokens processados)"
                 f"{ANSIStyle.RESET}\n"
             )
             sys.stdout.flush()
@@ -256,7 +257,7 @@ class StreamHandler:
         else:
             # Fallback: imprimir diretamente
             sys.stdout.write(
-                f"\n{ANSIStyle.CYAN}⚡ {event.message}{ANSIStyle.RESET}\n"
+                f"\n{ANSIStyle.CYAN}> {event.message}{ANSIStyle.RESET}\n"
             )
             sys.stdout.flush()
 
@@ -351,13 +352,14 @@ class StreamHandler:
             if not self._thinking_header_shown:
                 sys.stdout.write(
                     f"\n{ANSIStyle.GRAY}{'─' * 40}{ANSIStyle.RESET}\n"
-                    f"{ANSIStyle.DIM_ITALIC}💭 Raciocínio interno:{ANSIStyle.RESET}\n"
+                    f"{ANSIStyle.DIM_ITALIC}[Pensamento] Raciocínio interno:{ANSIStyle.RESET}\n"
                     f"{ANSIStyle.DIM}"
                 )
                 sys.stdout.flush()
                 self._thinking_header_shown = True
 
-            sys.stdout.write(f"{ANSIStyle.DIM}{chunk}{ANSIStyle.RESET}")
+            safe_chunk = chunk.encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
+            sys.stdout.write(f"{ANSIStyle.DIM}{safe_chunk}{ANSIStyle.RESET}")
             sys.stdout.flush()
         else:
             # FASE 2: Modo silencioso — exibir indicador de progresso
@@ -372,19 +374,20 @@ class StreamHandler:
             sys.stdout.write(
                 f"{ANSIStyle.RESET}\n"
                 f"{ANSIStyle.GRAY}{'─' * 40}{ANSIStyle.RESET}\n"
-                f"{ANSIStyle.GREEN}✅ Resposta:{ANSIStyle.RESET}\n"
+                f"{ANSIStyle.GREEN}[+] Resposta:{ANSIStyle.RESET}\n"
             )
         else:
             # FASE 2: Transição limpa sem header de thinking anterior
             sys.stdout.write(
-                f"{ANSIStyle.GREEN}✅ Resposta:{ANSIStyle.RESET}\n"
+                f"{ANSIStyle.GREEN}[+] Resposta:{ANSIStyle.RESET}\n"
             )
         sys.stdout.flush()
         self._content_header_shown = True
 
     def _render_content_chunk(self, chunk: str):
         """Renderiza um chunk de conteúdo final (estilo normal)."""
-        sys.stdout.write(chunk)
+        safe_chunk = chunk.encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
+        sys.stdout.write(safe_chunk)
         sys.stdout.flush()
 
     def _finalize_render(self):

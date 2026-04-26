@@ -66,3 +66,13 @@ F3 | FIX | _canonicalize_table() gera ID único por hash em vez de ISS-000 fixo 
 F3 | FIX | Controller passa show_thinking=think ao OllamaProvider | Raciocínio aparecia mesmo com think=False | src/core/controller.py
 F3 | FIX | ReportGenerator threshold corrigido para < 5 seções obrigatórias | Relatório incompleto era aceito como válido | src/core/report_generator.py
 F3 | FIX | SynthesizerAgent prompt instrui uso ativo dos dados do Board | Board não-vazio gerava (Nenhum registro) por interpretação excessivamente restritiva | src/agents/synthesizer_agent.py
+
+### Fase 6 (Onda 4) — Arquitetura Agnóstica a Domínios
+F6 | ADD | DomainDetector e DomainContextBuilder (Round 0A) | Permitir detecção e montagem programática da "alma" de qualquer área | src/core/domain_detector.py
+F6 | ADD | DomainProfile dataclass | Estrutura forte e estática das características do domínio a ser validado | src/core/domain_profile.py
+F6 | ADD | DynamicPromptBuilder | Separar a estrutura do Motor/Debate da semântica inserindo variáveis dinâmicas | src/core/dynamic_prompt_builder.py
+F6 | ADD | SpecialistFactory | Prover instâncias de agentes dinâmicos de acordo com a área do problema | src/agents/specialist_factory.py
+F6 | ADD | CategoryNormalizer genérico e fallback `return clean` | Normalizar detecções do LLM para as dimensões canônicas, mitigando erros (NoneType) | src/core/category_normalizer.py
+F6 | MOD | AdaptiveOrchestrator rastreia _spawned_categories (Deduplicação) | Prevenir que o debate repita o spawn do mesmo especialista infinitamente | src/core/adaptive_orchestrator.py
+F6 | FIX | DebateStateTracker_parse_v4 ajusta regex e tabela fixa de saída | LLMs estavam perdendo colunas. Forçado formatação rígida de 4 colunas. | src/debate/debate_state_tracker.py
+F6 | FIX | StreamHandler ganha buffer Unicode-safe (`safe_write`) | Modelos gpt-oss geravam símbolos Braille e hífen inquebrável, quebrando o CMD | src/core/stream_handler.py

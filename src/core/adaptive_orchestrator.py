@@ -62,6 +62,7 @@ class AdaptiveOrchestrator:
         self._min_rounds = min_rounds
         self._spawn_threshold = spawn_threshold
         self._current_agent_count = current_agent_count
+        self._spawned_categories = set()
 
     def evaluate(
         self,
@@ -165,6 +166,15 @@ class AdaptiveOrchestrator:
         if count < self._spawn_threshold:
             return None
 
+        # [DEDUPLICAÇÃO ONDA 4] Verificar se categoria já foi spawnada
+        if dominant_category in self._spawned_categories:
+            reason = (
+                f"Threshold de issues ({count}) atingido para {dominant_category}, "
+                f"mas especialista já foi spawnado anteriormente. Deduplicando."
+            )
+            logger.info(f"[Orchestrator] CONTINUE (deduplicado): {reason}")
+            return None
+
         # Verificar limite de agentes
         if self._current_agent_count >= self._max_agents:
             reason = (
@@ -186,3 +196,10 @@ class AdaptiveOrchestrator:
             reason=reason,
             category=dominant_category,
         )
+
+    def register_spawn(self, category: str) -> None:
+        """Registra que um especialista foi criado para a categoria."""
+        self._spawned_categories.add(category)
+        self._current_agent_count += 1
+        logger.info(f"[Orchestrator] Registro de spawn: {category}. Total agentes: {self._current_agent_count}")
+

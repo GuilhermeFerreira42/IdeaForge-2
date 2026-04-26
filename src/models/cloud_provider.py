@@ -11,7 +11,7 @@ class CloudProvider(ModelProvider):
         self.api_key = api_key
         self.model_name = model_name
 
-    def generate(self, prompt: str, context: list = None, role: str = "user") -> str:
+    def generate(self, prompt: str, context: list = None, role: str = "user", **kwargs) -> str:
         if not self.api_key:
             return "Error: LLM_API_KEY environment variable is not set."
             

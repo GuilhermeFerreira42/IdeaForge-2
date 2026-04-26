@@ -8,9 +8,12 @@ from src.debate.debate_engine import DebateEngine
 from src.debate.debate_state_tracker import DebateStateTracker
 from src.debate.context_builder import ContextBuilder
 from src.core.validation_board import ValidationBoard
+from src.core.domain_detector import DomainDetector
+from src.core.domain_context_builder import DomainContextBuilder
 from src.agents.synthesizer_agent import SynthesizerAgent
 from src.core.report_generator import ReportGenerator
 from src.models.ollama_provider import OllamaProvider, OllamaMemoryError, OllamaServiceError
+from src.models.cloud_provider import CloudProvider
 from src.config import settings
 
 logger = logging.getLogger(__name__)
@@ -33,10 +36,25 @@ class Controller:
         if not idea.strip():
             return {"status": "error", "error": "Ideia não pode ser vazia"}
 
-        # 1. Setup
+        # 1. Setup providers
         try:
-            provider = self._get_provider(model_name, think)
-            board = ValidationBoard()
+            # A seleção de provedor via sufixo "-cloud" estava forçando uso de Mock.
+            # Como a lista de modelos vem do Ollama, forçamos o uso do OllamaProvider.
+            is_cloud = False
+            provider = self._get_provider(model_name, think, is_cloud)
+            
+            # === ROUND 0A: Meta-Orquestração ===
+            logger.info(f"[Controller] Round 0A: Detectando domínio para '{idea[:50]}...'")
+            detector = DomainDetector()
+            domain_result = detector.detect(idea)
+            logger.info(f"[Controller] Domínio detectado: {domain_result.domain} (Conf: {domain_result.confidence})")
+            
+            context_builder = DomainContextBuilder(provider)
+            profile = context_builder.build(idea, domain_result.domain)
+            logger.info(f"[Controller] DomainProfile construído via {profile.source}")
+            
+            # Inicializa Board com o Profile
+            board = ValidationBoard(profile=profile)
             builder = ContextBuilder(board)
             engine = DebateEngine(provider, board, self.tracker, builder)
         except OllamaMemoryError as e:
@@ -83,8 +101,11 @@ class Controller:
             "model_used": model_name
         }
 
-    def _get_provider(self, model_name: str, think: bool) -> OllamaProvider:
-        """Instancia o provedor de modelo."""
+    def _get_provider(self, model_name: str, think: bool, is_cloud: bool = False) -> Any:
+        """Instancia o provedor de modelo (Ollama ou Cloud)."""
+        if is_cloud:
+            # CloudProvider assumido como existente para gpt-oss:20b-cloud
+            return CloudProvider(model_name=model_name)
         return OllamaProvider(model_name=model_name, think=think, show_thinking=think)
 
     def _get_output_path(self, idea_title: str) -> str:
