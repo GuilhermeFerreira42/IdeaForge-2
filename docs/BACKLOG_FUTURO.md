@@ -28,24 +28,30 @@
 
 ---
 
-## Onda 5 — Refinamento, Performance e Migração Legacy (Fase 7) [PROPOSTA]
+## Onda 5.0 — Qualidade Semântica e Convergência Real
+**Status:** EM ANDAMENTO
 
-A Onda 4 generalizou o MVP do IdeaForge 2 para funcionar em qualquer área de negócio. A Onda 5 foca na Otimização de Custos (Cache), Extinção de Legados e Interface Amigável (Visual UI).
+A execução de 26/04/2026 com a ideia "Agregador de Ofertas" revelou quatro falhas estruturais que invalidam o objetivo agnóstico da Onda 4. O BACKLOG da Onda 5 original (Cache, UI, Faxina Legada) foi **suspendido** para priorizar esses quatro bugs que contaminam todas as execuções futuras.
 
-### CONTRATOS_DA_ONDA 5 [PROPOSTA — aguardando validação do usuário]
-
-| Contrato | Responsabilidade | Status |
-| :--- | :--- | :--- |
-| `src/core/cache_manager.py` | [NOVO] Cache de inferência persitente para evitar redundâncias e poupar LLM requests | PENDENTE |
-| `src/ui/dashboard.py` | [NOVO] Micro-app Gradio ou Streamlit para visualização em tempo real do Debate/ValidationBoard | PENDENTE |
-| `idea-forge/src/` | [DELETE] Remoção completa e segura da sub-pasta de código legado v1 após auditoria | PENDENTE |
-
-### Itens de Trabalho (Backlog Onda 5)
+### Itens de Trabalho (Backlog Onda 5.0)
 | ID | Técnica/Feature | Descrição | Status |
 |---|---|---|---|
-| W5-01 | Cache Semântico | Cachear prompts exatos (e possivelmente near-matches) limitando repetições | PENDENTE |
-| W5-02 | UI em Tempo Real | Dashboard para mostrar issues nascendo, resoluções, logs interativos do DebateEngine | PENDENTE |
-| W5-03 | Faxina Legada | Identificar todo o repositório `/idea-forge/` e migrar configs restantes, depois `rm -rf` | PENDENTE |
+| W5Q-01 | JSON Resiliente | Caminho 3 (Boundary Detection) em `_extract_json()` e max_tokens 800 | PENDENTE |
+| W5Q-02 | Detector & Hybrid | Score Normalizado no DomainDetector e Fallback 'Hybrid' com 8 seções | PENDENTE |
+| W5Q-03 | Deduplicação Semântica | Threshold Jaccard 0.65 e ConvergenceDetector no AdaptiveOrchestrator | PENDENTE |
+| W5Q-04 | Synthesizer & Relatório | Snapshot da Juíza comprimido < 3200 chars e Resumo Executivo Padronizado | PENDENTE |
+
+---
+
+## Onda 5.1 — Performance e Interface (Suspensa da Onda 5.0)
+**Status:** PENDENTE
+
+### Itens de Trabalho (Backlog Onda 5.1)
+| ID | Técnica/Feature | Descrição | Status |
+|---|---|---|---|
+| W5-01 | Cache Semântico | Cachear prompts exatos limitando LLM requests | PENDENTE |
+| W5-02 | UI em Tempo Real | Dashboard Gradio/Streamlit do ValidationBoard | PENDENTE |
+| W5-03 | Faxina Legada | Identificar e remover `idea-forge/` após auditoria completa | PENDENTE |
 
 ---
 
