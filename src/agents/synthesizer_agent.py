@@ -62,9 +62,9 @@ class SynthesizerAgent:
 
     def _build_prompt(self, board_snapshot: Dict[str, Any], idea_title: str, profile: Optional[Any] = None) -> str:
         """
-        Monta o prompt conforme o blueprint.
+        Monta o prompt conforme o blueprint. (W5Q-04)
         """
-        snapshot_json = json.dumps(board_snapshot, indent=2, ensure_ascii=False)
+        snapshot_json = self._compress_snapshot(board_snapshot)
         domain = profile.domain.upper() if profile else "GENERIC"
         
         sections_str = "\n".join([f"- {s}" for s in self.DEFAULT_SECTIONS])
@@ -90,6 +90,36 @@ IDEIA ANALISADA: {idea_title}
 BOARD_SNAPSHOT:
 {snapshot_json}
 """
+
+    def _compress_snapshot(self, snapshot_raw: Dict[str, Any], max_chars: int = 3200) -> str:
+        """
+        Comprime o snapshot para caber no orçamento de contexto do LLM. (W5Q-04)
+        """
+        import copy
+        snapshot = copy.deepcopy(snapshot_raw)
+        
+        # 1. Remover metadados secundários e truncar descrições
+        for issue in snapshot.get("issues", {}).values():
+            issue.pop("round_raised", None)
+            if len(issue.get("description", "")) > 120:
+                issue["description"] = issue["description"][:117] + "..."
+        
+        for dec in snapshot.get("decisions", {}).values():
+            dec.pop("round_raised", None)
+            if len(dec.get("description", "")) > 100:
+                dec["description"] = dec["description"][:97] + "..."
+
+        # 2. Serializar sem indentação para economizar espaço
+        compressed = json.dumps(snapshot, ensure_ascii=False)
+        
+        if len(compressed) <= max_chars:
+            return compressed
+            
+        # 3. Se ainda for grande, manter apenas issues OPEN
+        snapshot["issues"] = {k: v for k, v in snapshot["issues"].items() if v.get("status") == "OPEN"}
+        compressed = json.dumps(snapshot, ensure_ascii=False)
+        
+        return compressed[:max_chars]
 
     def _validate_report(self, report: str, required_sections: List[str]) -> List[str]:
         """

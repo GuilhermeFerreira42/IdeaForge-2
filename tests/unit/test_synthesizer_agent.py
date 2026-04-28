@@ -69,10 +69,23 @@ def test_synthesizer_build_prompt_contains_snapshot():
     # Verifica se parece JSON
     assert '"issue_id": "ISS-01"' in prompt
 
-def test_synthesizer_prompt_contains_use_data_instruction():
-    """BUG-D: Verifica se o prompt contém a instrução de uso ativo dos dados (HF02)."""
-    agent = SynthesizerAgent()
-    prompt = agent._build_prompt({}, "Instruction Test")
-    
     assert "USE esses dados para preencher as seções" in prompt
     assert "NUNCA deve gerar \"(Nenhum registro)\" em Issues ou Decisões" in prompt
+
+def test_compress_board_snapshot_limit_3200():
+    """W5Q-04: Snapshot no prompt deve ser comprimido para < 3200 chars."""
+    board = ValidationBoard()
+    # Adicionar muitos issues para estourar o limite
+    for i in range(50):
+        board.add_issue(IssueRecord(f"ISS-{i}", "HIGH", "SECURITY", "Desc" * 20))
+    
+    agent = SynthesizerAgent()
+    prompt = agent._build_prompt(board.snapshot(), "Big Test")
+    
+    # Encontrar a parte do snapshot no prompt
+    import re
+    match = re.search(r"BOARD_SNAPSHOT:\n(\{.*\})", prompt, re.DOTALL)
+    assert match is not None
+    snapshot_json = match.group(1)
+    
+    assert len(snapshot_json) <= 3200

@@ -14,15 +14,15 @@ def test_full_debate_natural_convergência():
     # Mock de respostas
     def generator_factory(prompt):
         if "ESTRUTURA OBRIGATÓRIA" in prompt:
-            return "# 1. Visão Geral\nProposta inicial"
+            return "# 1. Visão Geral\nProposta inicial super detalhada que com certeza passa de cinquenta caracteres."
         if "Você é o Agente Crítico" in prompt:
             # Check for empty issues indication
             if "Nenhum issue aberto" in prompt:
-                return "## Novos Issues Encontrados\n| HIGH | SECURITY | Falha X | Corrigir |"
-            return "## Novos Issues Encontrados\nNenhum problema novo."
+                return "## Novos Issues Encontrados\n| HIGH | SECURITY | Falha X | Corrigir vulnerabilidade imediatamente |"
+            return "## Novos Issues Encontrados\nNenhum problema novo identificado após uma análise rigorosa e completa de segurança."
         if "Você é o Agente Proponente defendendo" in prompt:
-            return "## Pontos Aceitos\nAceito ISS-000. ## Melhorias Propostas\n| Visão Geral | Modificado | Justifica |"
-        return "Mock response"
+            return "## Pontos Aceitos\nAceito ISS-000. ## Melhorias Propostas\n| Visão Geral | Modificado | Justificativa longa para validação |"
+        return "Mock response genérica que garante mais de cinquenta caracteres para passar na guarda de tamanho."
 
     provider = MockProvider(responses=generator_factory)
     engine = DebateEngine(provider=provider, board=board, tracker=tracker, builder=builder)

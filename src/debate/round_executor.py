@@ -98,6 +98,15 @@ class RoundExecutor:
         prompt = self.builder.build_critique_prompt(current_proposal, last_defense)
         raw_text = self.critic.review(prompt)
         
+        # GUARDA DE SEGURANÇA: Evitar falsa convergência por falhas de API
+        if len(raw_text.strip()) < 50:
+            logger.error(f"[RoundExecutor] Resposta do Crítico extremamente curta ({len(raw_text)} chars). Falha de API ou Prompt?")
+            return RoundResult(
+                raw_text=f"[FAILED_ROUND_SHORT_RESPONSE_{round_num}]",
+                parsing_succeeded=False,
+                new_issue_count=-1
+            )
+        
         # Canonicalizar antes do tracker
         processed_text = self._canonicalize_table(raw_text)
         
@@ -117,6 +126,16 @@ class RoundExecutor:
         prompt = self.builder.build_defense_prompt(current_proposal, last_critique)
         raw_text = self.proponent.defend(prompt)
         
+        # GUARDA DE SEGURANÇA: Evitar corrupção do texto por falhas de API
+        if len(raw_text.strip()) < 50:
+            logger.error(f"[RoundExecutor] Resposta do Proponente extremamente curta ({len(raw_text)} chars). Mantendo proposta atual.")
+            return RoundResult(
+                raw_text=f"[FAILED_DEFENSE_SHORT_RESPONSE_{round_num}]",
+                parsing_succeeded=False,
+                new_issue_count=0,
+                updated_proposal=current_proposal
+            )
+            
         updated_proposal = self.apply_defense_patches(current_proposal, raw_text)
         
         # Tracker extrai resoluções

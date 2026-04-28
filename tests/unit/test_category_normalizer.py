@@ -26,6 +26,6 @@ def test_normalize_via_keywords(business_profile):
     assert normalizer.normalize("Análise de Mercado") == "MARKET_FIT"
     assert normalizer.normalize("custos operacionais") == "UNIT_ECONOMICS"
 
-def test_normalize_unknown_returns_none(business_profile):
+def test_normalize_unknown_returns_original_clean(business_profile):
     normalizer = CategoryNormalizer(business_profile)
-    assert normalizer.normalize("Culinária") is None
+    assert normalizer.normalize("Culinária") == "CULINÁRIA"

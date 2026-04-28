@@ -18,7 +18,7 @@ def test_smoke_full_pipeline():
     idea = "Sistema de delivery com drones para farmácias"
     ctrl = Controller()
     
-    result = ctrl.run(idea, debug=True)
+    result = ctrl.run(idea, model_name="llama3.2:1b", debug=True)
     
     assert result["status"] == "success"
     assert "output_path" in result

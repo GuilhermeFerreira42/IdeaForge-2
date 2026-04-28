@@ -38,6 +38,10 @@ class ReportGenerator:
             sections_present = synth_result["sections_present"]
 
         try:
+            # W5Q-04: Tabela de Resumo Executivo no topo
+            summary_table = self._generate_summary_table(board)
+            report_markdown = summary_table + "\n\n" + report_markdown
+            
             self._persist(report_markdown, output_path)
             return {
                 "status": "success",
@@ -101,6 +105,25 @@ class ReportGenerator:
             lines.append(f"- **{ass_id}**: {ass['description']} (Status: {ass['status']})")
             
         return "\n".join(lines)
+
+    def _generate_summary_table(self, board: ValidationBoard) -> str:
+        """
+        Gera a tabela de resumo executivo (W5Q-04).
+        """
+        stats = board.get_stats()
+        open_issues = stats['open_issues']
+        status_issues = "🔴 CRÍTICO" if open_issues > 3 else ("🟡 ATENÇÃO" if open_issues > 0 else "🟢 LIMPO")
+        
+        table = [
+            "### Resumo Executivo (NEXUS)",
+            "| Métrica | Valor | Status |",
+            "|---|---|---|",
+            f"| Issues Totais | {stats['total_issues']} | - |",
+            f"| Issues Abertos | {open_issues} | {status_issues} |",
+            f"| Decisões Validadas | {stats['validated_decisions']} | {int((stats['validated_decisions']/max(1, stats['total_decisions']))*100)}% |",
+            f"| Pressupostos Pendentes | {stats['untested_assumptions']} | {'🟡' if stats['untested_assumptions'] > 0 else '🟢'} |"
+        ]
+        return "\n".join(table)
 
     def _persist(self, content: str, output_path: str) -> None:
         """

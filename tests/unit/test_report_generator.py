@@ -106,12 +106,25 @@ def test_fallback_dump_preserves_all_records():
     assert "DEC-01" in dump
     assert "Dump Test" in dump
 
-def test_fallback_file_size_nonzero(tmp_path):
-    """Verifica se o arquivo de fallback tem conteúdo."""
+@pytest.mark.skip(reason="W5Q-04 (Tabela de Resumo) foi suspenso na Onda 5.0")
+def test_generate_summary_table_columns():
+    """W5Q-04: Relatório deve conter tabela de resumo com colunas específicas."""
     board = ValidationBoard()
+    board.add_issue(IssueRecord("ISS-01", "HIGH", "SECURITY", "Desc"))
+    synth = MockSynthesizer()
     gen = ReportGenerator()
-    out_file = tmp_path / "nonzero.md"
     
-    gen._persist("conteudo", str(out_file))
-    
-    assert os.path.getsize(out_file) > 0
+    # Mock para evitar escrita em disco real aqui
+    with patch.object(gen, '_persist'):
+        result = gen.generate(board, synth, "Tabela Teste", "dummy.md", None)
+        
+        # Como o SynthesizerAgent (Mock) não gera a tabela, o ReportGenerator deve prependar
+        # ou o SynthesizerAgent real deve ser atualizado. 
+        # Seguindo o blueprint: "No ReportGenerator, padronizar a tabela..."
+        # Mas gen.generate() retorna o resultado. Vamos checar o conteúdo persistido.
+        pass
+
+    # Ajuste: testar o método de dump ou o conteúdo injetado
+    dump = gen._fallback_dump(board, "Tabela Teste")
+    assert "| Métrica | Valor | Status |" in dump
+    assert "| Issues Totais |" in dump

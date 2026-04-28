@@ -6,13 +6,16 @@ DOMAIN_KEYWORDS = {
     "software": [
         "api", "banco de dados", "backend", "frontend", "microservices",
         "kubernetes", "docker", "cloud", "aws", "arquitetura",
-        "scalability", "performance", "latency", "throughput", "autenticação", "segurança"
+        "scalability", "performance", "latency", "throughput", "autenticação", "segurança",
+        "machine learning", "serverless", "ia", "agente", "automatiz", "infraestrutura"
     ],
     "business": [
         "mercado", "cliente", "receita", "custo", "margem",
         "unit economics", "ltv", "cac", "churn", "growth",
-        "competição", "positioning", "go-to-market", "saas", "modelo de negócio"
+        "competição", "positioning", "go-to-market", "saas", "modelo de negócio",
+        "lucro", "afiliado", "seo", "conversão", "marketing", "plataforma", "venda"
     ],
+    # ... outros domínios permanecem iguais ...
     "event": [
         "evento", "conferência", "workshop", "hackathon",
         "logística", "venue", "catering", "transporte",
@@ -47,7 +50,7 @@ class DomainDetectionResult:
 class DomainDetector:
     """
     Classificador de domínio 100% programático.
-    Sem LLM, sem I/O, sem estado — apenas keywords e heurística.
+    Implementa normalização por densidade (W5Q-02).
     """
     
     def __init__(self, keywords_map: Optional[dict] = None):
@@ -55,12 +58,12 @@ class DomainDetector:
     
     def detect(self, idea: str) -> DomainDetectionResult:
         """
-        Detecta domínio analisando keywords na ideia.
+        Detecta domínio analisando densidade de keywords (W5Q-02).
         """
         normalized_idea = idea.lower()
         
-        scores = {}
         matches = {}
+        densities = {}
         
         for domain, keywords in self.keywords_map.items():
             domain_matches = []
@@ -69,26 +72,35 @@ class DomainDetector:
                     domain_matches.append(kw)
             
             if domain_matches:
-                # Score simples: número de matches únicos
-                scores[domain] = len(set(domain_matches))
+                unique_matches = len(set(domain_matches))
+                total_domain_keywords = len(keywords)
+                # Densidade = matches únicos / total de keywords do domínio
+                densities[domain] = unique_matches / total_domain_keywords
                 matches[domain] = domain_matches
         
-        if not scores:
+        if not densities:
             return DomainDetectionResult(domain="generic", confidence=0.0, matched_keywords=[])
         
-        # Encontrar o domínio com maior score
-        best_domain = max(scores, key=scores.get)
-        max_score = scores[best_domain]
+        # Encontrar os dois melhores para checar hybrid (software e business)
+        best_domain = max(densities, key=densities.get)
         
-        # Confidence baseada na densidade de matches (heurística simples)
-        # Se max_score >= 2, confiança alta. Se 1, média.
-        confidence = min(1.0, max_score * 0.4)
-        
-        if confidence < 0.5:
-             # Se confiança muito baixa, ainda pode ser generic se quisermos rigor
-             # Mas o detector deve retornar o que achou se o contrato pedir
-             pass
+        # Lógica especial para HYBRID (W5Q-02)
+        # Se software e business empatarem na densidade, retorna hybrid
+        if "software" in densities and "business" in densities:
+            soft_dense = densities["software"]
+            bus_dense = densities["business"]
+            
+            # Margem de tolerância para empate: 0.01
+            if abs(soft_dense - bus_dense) < 0.01:
+                return DomainDetectionResult(
+                    domain="hybrid",
+                    confidence=max(soft_dense, bus_dense) * 5.0, # Normalizar confiança
+                    matched_keywords=list(set(matches["software"] + matches["business"]))
+                )
 
+        max_density = densities[best_domain]
+        confidence = min(1.0, max_density * 5.0) # Heurística: 20% das keywords = 100% conf
+        
         return DomainDetectionResult(
             domain=best_domain,
             confidence=confidence,

@@ -121,17 +121,21 @@ class AdaptiveOrchestrator:
         if converged:
             open_issues = self.board.get_open_issues()
             has_high = any(i.severity == "HIGH" for i in open_issues)
+            
+            # W5Q-03: Motivo detalhado com threshold
+            from src.config.settings import CONVERGENCE_THRESHOLD
+            base_reason = f"Saturação Semântica atingida com threshold {CONVERGENCE_THRESHOLD}"
 
             if has_high:
                 # Convergência detectada mas há issues HIGH → avisar mas parar
                 reason = (
-                    f"Convergência detectada no round {round_num}, "
+                    f"{base_reason} no round {round_num}, "
                     f"mas {len(open_issues)} issue(s) HIGH ainda aberto(s). "
                     f"Debate encerrado por convergência."
                 )
             else:
                 reason = (
-                    f"Convergência detectada no round {round_num}. "
+                    f"{base_reason} no round {round_num}. "
                     f"Debate esgotou argumentos novos."
                 )
 

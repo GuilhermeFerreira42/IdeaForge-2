@@ -52,3 +52,27 @@ def test_dedup_normalized_description(tracker, board):
     
     # Should only have 1 issue in board
     assert len(board._issues) == 1
+
+def test_is_semantic_duplicate_identifica_duplicata(tracker, board):
+    """W5Q-03: Frases semânticas similares devem ser detectadas como duplicadas."""
+    board.add_issue(IssueRecord("ISS-01", "HIGH", "SECURITY", "O banco de dados está exposto sem senha na porta 5432."))
+    
+    # Frase muito similar
+    new_desc = "O banco de dados está exposto sem senha na porta 5432, vulnerabilidade grave."
+    assert tracker._is_semantic_duplicate(new_desc, board, "SECURITY") is True
+
+def test_is_semantic_duplicate_ignora_diferentes(tracker, board):
+    """W5Q-03: Frases de categorias diferentes ou temas distintos não são duplicadas."""
+    board.add_issue(IssueRecord("ISS-01", "HIGH", "SECURITY", "O banco de dados está exposto."))
+    
+    # Mesmo tema, categoria diferente (não deve ser duplicata se categorias forem tratadas isoladas)
+    # Ou tema totalmente diferente
+    new_desc = "O sistema está lento para processar imagens grandes."
+    assert tracker._is_semantic_duplicate(new_desc, board, "PERFORMANCE") is False
+
+def test_is_semantic_duplicate_usa_stopwords(tracker, board):
+    """W5Q-03: A comparação deve ignorar stopwords para ser puramente semântica."""
+    board.add_issue(IssueRecord("ISS-01", "HIGH", "SEC", "Falha de segurança."))
+    # "Uma" e "a" são stopwords, "falha" e "segurança" são o núcleo.
+    new_desc = "Uma falha a segurança."
+    assert tracker._is_semantic_duplicate(new_desc, board, "SEC") is True

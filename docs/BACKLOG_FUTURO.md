@@ -29,17 +29,17 @@
 ---
 
 ## Onda 5.0 — Qualidade Semântica e Convergência Real
-**Status:** EM ANDAMENTO
+**Status:** CONCLUÍDO
 
 A execução de 26/04/2026 com a ideia "Agregador de Ofertas" revelou quatro falhas estruturais que invalidam o objetivo agnóstico da Onda 4. O BACKLOG da Onda 5 original (Cache, UI, Faxina Legada) foi **suspendido** para priorizar esses quatro bugs que contaminam todas as execuções futuras.
 
 ### Itens de Trabalho (Backlog Onda 5.0)
 | ID | Técnica/Feature | Descrição | Status |
 |---|---|---|---|
-| W5Q-01 | JSON Resiliente | Caminho 3 (Boundary Detection) em `_extract_json()` e max_tokens 800 | PENDENTE |
-| W5Q-02 | Detector & Hybrid | Score Normalizado no DomainDetector e Fallback 'Hybrid' com 8 seções | PENDENTE |
-| W5Q-03 | Deduplicação Semântica | Threshold Jaccard 0.65 e ConvergenceDetector no AdaptiveOrchestrator | PENDENTE |
-| W5Q-04 | Synthesizer & Relatório | Snapshot da Juíza comprimido < 3200 chars e Resumo Executivo Padronizado | PENDENTE |
+| W5Q-01 | JSON Resiliente | Caminho 3 (Boundary Detection) em `_extract_json()` e max_tokens 800 | CONCLUÍDO |
+| W5Q-02 | Detector & Hybrid | Score Normalizado no DomainDetector e Fallback 'Hybrid' com 8 seções | CONCLUÍDO |
+| W5Q-03 | Deduplicação Semântica | Threshold Jaccard 0.65 e ConvergenceDetector no AdaptiveOrchestrator | CONCLUÍDO |
+| W5Q-04 | Synthesizer & Relatório | Snapshot da Juíza comprimido < 3200 chars e Resumo Executivo Padronizado | CONCLUÍDO |
 
 ---
 
@@ -52,6 +52,12 @@ A execução de 26/04/2026 com a ideia "Agregador de Ofertas" revelou quatro fal
 | W5-01 | Cache Semântico | Cachear prompts exatos limitando LLM requests | PENDENTE |
 | W5-02 | UI em Tempo Real | Dashboard Gradio/Streamlit do ValidationBoard | PENDENTE |
 | W5-03 | Faxina Legada | Identificar e remover `idea-forge/` após auditoria completa | PENDENTE |
+
+**[PROPOSTA — aguardando validação do usuário]**
+### CONTRATOS_DA_ONDA (5.1)
+- **C1:** O Cache Semântico será implementado por interceptação das queries para o LLM via hash de inputs.
+- **C2:** A UI utilizará Gradio (ou Streamlit) executada a partir de flag específica via CLI, consultando dados no disco, sem alterar o engine do debate sincrono.
+- **C3:** A pasta legada `idea-forge/` será totalmente removida para limpar as importações que causaram conflitos no provider routing.
 
 ---
 

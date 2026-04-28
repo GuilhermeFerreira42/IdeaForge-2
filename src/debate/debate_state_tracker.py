@@ -8,6 +8,9 @@ from src.core.validation_board import (
     AssumptionRecord
 )
 from src.core.category_normalizer import CategoryNormalizer
+from src.core.convergence_detector import ConvergenceDetector
+
+SEMANTIC_DEDUP_THRESHOLD: float = 0.65
 
 STOPWORDS_PT: Set[str] = {
     "o", "a", "de", "que", "para", "com", "em", "é", "um", "uma",
@@ -32,6 +35,8 @@ KEYWORDS_SEVERITY = {
 }
 
 class DebateStateTracker:
+    def __init__(self):
+        self._convergence_detector = ConvergenceDetector()
     
     def _normalize_text(self, text: str) -> str:
         text = text.lower().strip()
@@ -40,7 +45,7 @@ class DebateStateTracker:
         text = re.sub(r'\s+', ' ', text)          # colapsa espaços
         words = text.split()
         words = [w for w in words if w not in STOPWORDS_PT]
-        return ' '.join(words)[:40] # Prefixo de 40 chars
+        return ' '.join(words)[:80] # Prefixo de 80 chars (W5Q-03)
     
     def _parse_v4(self, text: str, round_num: int) -> List[IssueRecord]:
         """Extrai issues da tabela Markdown de 4 colunas (Onda 4).
@@ -80,7 +85,7 @@ class DebateStateTracker:
     def _parse_level1(self, text: str, round_num: int) -> List[IssueRecord]:
         # Mantido para retrocompatibilidade com Tabelas de 3 ou 5 colunas de ondas anteriores
         records = []
-        pattern = r'\|\s*(ISS-\d+)\s*\|\s*(HIGH|MED|LOW)\s*\|\s*(\w+)\s*\|\s*([^|]+)\|'
+        pattern = r'\|\s*(ISS-\d+)\s*\|\s*(HIGH|MED|LOW)\s*\|\s*([\w_]+)\s*\|\s*([^|]+)\|'
         for match in re.finditer(pattern, text):
             issue_id = match.group(1).strip()
             severity = match.group(2).strip()
@@ -129,15 +134,51 @@ class DebateStateTracker:
                 
         return records
 
+    def _is_semantic_duplicate(
+        self,
+        new_description: str,
+        board: ValidationBoard,
+        category: str,
+        threshold: float = SEMANTIC_DEDUP_THRESHOLD
+    ) -> bool:
+        """
+        Verifica se new_description é semanticamente duplicata de algum issue
+        já registrado na mesma categoria. (W5Q-03)
+        """
+        try:
+            open_issues = board.get_open_issues()
+            same_category = [
+                iss for iss in open_issues
+                if iss.category.upper() == category.upper()
+            ]
+            
+            new_prefix = self._normalize_text(new_description)
+            
+            for existing in same_category:
+                existing_prefix = self._normalize_text(existing.description)
+                similarity = self._convergence_detector.similarity(
+                    new_prefix, existing_prefix
+                )
+                if similarity >= threshold:
+                    return True
+            
+            return False
+        except Exception:
+            return False
+
     def _deduplicate(self, records: List[IssueRecord], board: ValidationBoard) -> List[IssueRecord]:
         unique_records = []
-        existing_normalized = [self._normalize_text(i.description) for i in board._issues.values()]
         
         for r in records:
-            norm = self._normalize_text(r.description)
-            if norm not in existing_normalized and r.issue_id not in board._issues:
-                unique_records.append(r)
-                existing_normalized.append(norm)
+            # 1. Dedup por hash de ID (exato)
+            if r.issue_id in board._issues:
+                continue
+                
+            # 2. Dedup semântico (W5Q-03)
+            if self._is_semantic_duplicate(r.description, board, r.category):
+                continue
+                
+            unique_records.append(r)
         return unique_records
 
     def extract_issues_from_critique(self, critique_text: str, round_num: int, board: ValidationBoard) -> List[str]:

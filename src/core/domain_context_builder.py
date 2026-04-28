@@ -8,35 +8,33 @@ from src.models.model_provider import ModelProvider
 logger = logging.getLogger(__name__)
 
 DOMAIN_CONTEXT_PROMPT = """
-Você é um assistente de meta-análise do IdeaForge 2.
+Você é um assistente de meta-análise do IdeaForge 2, especialista em decomposição de ideias complexas.
 
-TAREFA: Analisar a ideia abaixo e retornar UM JSON estruturado.
-PROIBIDO: texto adicional, saudações, ou explicações.
+TAREFA: Analisar a ideia abaixo e retornar UM JSON estruturado que definirá o perfil de debate.
+PROIBIDO: explicações fora do JSON. Se precisar falar algo, coloque dentro das instruções das seções.
 
 IDEIA:
 {idea}
 
 DOMÍNIO DETECTADO: {detected_domain}
 
-Retorne EXATAMENTE este JSON (sem Markdown, sem comentários):
+Retorne EXATAMENTE este JSON (UTF-8):
 
 {{
   "expansion_sections": [
     {{
-      "id": "SEÇÃO_1_ID",
+      "id": "SECAO_1_ID",
       "title": "Título em PT-BR",
       "instruction": "Instrução concisa (máx 160 chars)"
-    }},
-    ...
+    }}
   ],
   "validation_dimensions": [
     {{
-      "id": "DIMENSÃO_1_ID",
+      "id": "DIMENSAO_1_ID",
       "display_name": "Nome para Exibição",
       "description": "Descrição breve do que valida",
       "spawn_hint": "Tipo de especialista"
-    }},
-    ...
+    }}
   ],
   "specialist_hints": ["Especialista A", "Especialista B"],
   "critical_questions": ["Pergunta 1", "Pergunta 2"],
@@ -45,11 +43,10 @@ Retorne EXATAMENTE este JSON (sem Markdown, sem comentários):
   }}
 }}
 
-REGRAS:
-1. expansion_sections: 6-8 seções, IDs em UPPER_SNAKE_CASE
-2. validation_dimensions: 4-6 dimensões, cobrindo principais lacunas
-3. specialist_hints: máx 3 especialistas mais prováveis
-4. JSON VÁLIDO ou fallback será aplicado
+REGRAS DE CONTEÚDO:
+1. expansion_sections: 6-8 seções, IDs em UPPER_SNAKE_CASE, específicas para o domínio detectado
+2. validation_dimensions: 4-6 dimensões cobrindo as principais lacunas desse tipo de ideia
+3. specialist_hints: máx 3 especialistas mais prováveis para esse domínio
 """
 
 DOMAIN_FALLBACKS = {
@@ -84,6 +81,23 @@ DOMAIN_FALLBACKS = {
             {"id": "SCALABILITY", "display_name": "Escalabilidade", "description": "Performance sob carga", "spawn_hint": "Engenheiro de SRE"},
             {"id": "RELIABILITY", "display_name": "Confiabilidade", "description": "Disponibilidade e tolerância a falhas", "spawn_hint": "Arquiteto de Sistemas"}
         ]
+    },
+    "hybrid": {
+        "expansion_sections": [
+            {"id": "PROPOSTA_VALOR", "title": "Proposta de Valor", "instruction": "Diferencial competitivo e dor resolvida"},
+            {"id": "PUBLICO_CANAIS", "title": "Público e Canais", "instruction": "Segmentação e estratégia de aquisição"},
+            {"id": "MODELO_RECEITA", "title": "Modelo de Receita", "instruction": "Como a solução gera faturamento"},
+            {"id": "ARQUITETURA_TECNICA", "title": "Arquitetura Técnica", "instruction": "Componentes de software e infraestrutura"},
+            {"id": "DADOS_INGESTAO", "title": "Stack de Dados e Ingestão", "instruction": "Origem, fluxo e processamento de dados"},
+            {"id": "SEGURANCA_PRIVACIDADE", "title": "Segurança e Privacidade", "instruction": "Proteção de dados e conformidade"},
+            {"id": "RISCOS_BARREIRAS", "title": "Riscos e Barreiras de Mercado", "instruction": "Desafios técnicos e competitivos"},
+            {"id": "PREMISSAS_CRESCIMENTO", "title": "Premissas de Crescimento", "instruction": "Fatores críticos para escala"}
+        ],
+        "validation_dimensions": [
+            {"id": "FEASIBILITY", "display_name": "Viabilidade Técnica", "description": "Capacidade de construir a solução", "spawn_hint": "Arquiteto de Soluções"},
+            {"id": "BUSINESS_VIABILITY", "display_name": "Viabilidade de Negócio", "description": "Rentabilidade e mercado", "spawn_hint": "Analista de Negócios"},
+            {"id": "SECURITY", "display_name": "Segurança", "description": "Riscos de dados e acesso", "spawn_hint": "Especialista em Segurança"}
+        ]
     }
 }
 
@@ -100,7 +114,8 @@ class DomainContextBuilder:
 
     def _build_with_llm(self, idea: str, detected_domain: str) -> DomainProfile:
         prompt = DOMAIN_CONTEXT_PROMPT.format(idea=idea[:800], detected_domain=detected_domain)
-        response = self.provider.generate(prompt=prompt, max_tokens=600, role="user")
+        # max_tokens aumentado de 600 para 800 para evitar truncamento silencioso (W5Q-01)
+        response = self.provider.generate(prompt=prompt, max_tokens=800, role="user")
         
         data = self._extract_json(response)
         if not data:
@@ -109,19 +124,30 @@ class DomainContextBuilder:
         return self._create_profile(data, detected_domain, "llm")
 
     def _extract_json(self, response: str) -> Optional[Dict[str, Any]]:
-        # Tenta parse direto
+        # Caminho 1: Parse direto
         try:
             return json.loads(response)
         except json.JSONDecodeError:
             pass
         
-        # Tenta extrair de blocos de código
+        # Caminho 2: Blocos de código Markdown
         match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group(1))
             except json.JSONDecodeError:
                 pass
+        
+        # Caminho 3: Boundary Detection (W5Q-01)
+        # Captura o primeiro '{' e o último '}' para ignorar prosa ao redor
+        try:
+            start_idx = response.find('{')
+            end_idx = response.rfind('}')
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                json_str = response[start_idx:end_idx + 1]
+                return json.loads(json_str)
+        except Exception:
+            pass
         
         return None
 
@@ -134,7 +160,7 @@ class DomainContextBuilder:
         validation_dimensions = [ValidationDimension(**d) for d in data.get("validation_dimensions", [])]
         
         return DomainProfile(
-            domain=domain,
+            domain=data.get("domain", domain),
             confidence=1.0 if source == "llm" else 0.5,
             source=source,
             expansion_sections=expansion_sections,

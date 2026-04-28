@@ -15,6 +15,27 @@ from src.core.report_generator import ReportGenerator
 from src.models.ollama_provider import OllamaProvider, OllamaMemoryError, OllamaServiceError
 from src.models.cloud_provider import CloudProvider
 from src.config import settings
+from src.core.stream_handler import ANSIStyle
+
+def emit_pipeline_state(state: str, detail: str = ""):
+    """
+    Emite um evento de estado visual para o terminal (IdeaForge 2).
+    """
+    state_icons = {
+        "ROUND_0A": "🔍",
+        "DEBATE_START": "💬",
+        "SYNTHESIS": "📝",
+        "COMPLETE": "✅",
+        "FALLBACK": "⚠️",
+    }
+    icon = state_icons.get(state, "⚡")
+    detail_str = f" — {detail}" if detail else ""
+    sys.stdout.write(
+        f"\n{ANSIStyle.CYAN}{ANSIStyle.BOLD}"
+        f"[{icon} {state}]{detail_str}"
+        f"{ANSIStyle.RESET}\n"
+    )
+    sys.stdout.flush()
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +59,8 @@ class Controller:
 
         # 1. Setup providers
         try:
-            # A seleção de provedor via sufixo "-cloud" estava forçando uso de Mock.
-            # Como a lista de modelos vem do Ollama, forçamos o uso do OllamaProvider.
-            is_cloud = False
+            # Onda 5: Determinação dinâmica do provedor baseado no sufixo do modelo
+            is_cloud = model_name.lower().endswith("-cloud") or ":cloud" in model_name.lower()
             provider = self._get_provider(model_name, think, is_cloud)
             
             # === ROUND 0A: Meta-Orquestração ===
@@ -51,6 +71,13 @@ class Controller:
             
             context_builder = DomainContextBuilder(provider)
             profile = context_builder.build(idea, domain_result.domain)
+            
+            # W5Q-01: Observabilidade Round 0A
+            if profile.source == "llm":
+                emit_pipeline_state("ROUND_0A", "Meta-Análise concluída via LLM")
+            else:
+                emit_pipeline_state("FALLBACK", "Round 0A degradado para Fallback estático")
+                
             logger.info(f"[Controller] DomainProfile construído via {profile.source}")
             
             # Inicializa Board com o Profile
@@ -103,10 +130,16 @@ class Controller:
 
     def _get_provider(self, model_name: str, think: bool, is_cloud: bool = False) -> Any:
         """Instancia o provedor de modelo (Ollama ou Cloud)."""
-        if is_cloud:
-            # CloudProvider assumido como existente para gpt-oss:20b-cloud
+        import os
+        has_external_key = bool(os.getenv("LLM_API_KEY", "").strip())
+        is_ollama_cloud_proxy = is_cloud and not has_external_key
+        
+        if is_ollama_cloud_proxy or not is_cloud:
+            # Caso padrão: todos os modelos do seu Ollama, incluindo os "*-cloud"
+            return OllamaProvider(model_name=model_name, think=think, show_thinking=think)
+        else:
+            # Reservado para quando LLM_API_KEY real for configurada
             return CloudProvider(model_name=model_name)
-        return OllamaProvider(model_name=model_name, think=think, show_thinking=think)
 
     def _get_output_path(self, idea_title: str) -> str:
         """Gera o nome do arquivo com timestamp conforme ADR-W3-05."""

@@ -76,3 +76,9 @@ F6 | ADD | CategoryNormalizer genérico e fallback `return clean` | Normalizar d
 F6 | MOD | AdaptiveOrchestrator rastreia _spawned_categories (Deduplicação) | Prevenir que o debate repita o spawn do mesmo especialista infinitamente | src/core/adaptive_orchestrator.py
 F6 | FIX | DebateStateTracker_parse_v4 ajusta regex e tabela fixa de saída | LLMs estavam perdendo colunas. Forçado formatação rígida de 4 colunas. | src/debate/debate_state_tracker.py
 F6 | FIX | StreamHandler ganha buffer Unicode-safe (`safe_write`) | Modelos gpt-oss geravam símbolos Braille e hífen inquebrável, quebrando o CMD | src/core/stream_handler.py
+
+### Fase 6.5 (Onda 5.0) — Qualidade Semântica e Prevenção de Falsa Convergência
+F6.5 | ADD | Guarda de Segurança no RoundExecutor | Rejeitar respostas < 50 chars e evitar Jaccard 1.0 artificial | src/debate/round_executor.py
+F6.5 | FIX | Roteamento Controller._get_provider() | Direcionar modelos -cloud para OllamaProvider local | src/core/controller.py
+F6.5 | MOD | Reversão do CloudProvider para Stub Puro | Validar testes e separar responsabilidades da nuvem | src/models/cloud_provider.py
+F6.5 | ADD | Testes de integração Provider Routing | 42 testes asseguram integridade de injeção do modelo | tests/unit/test_provider_routing.py

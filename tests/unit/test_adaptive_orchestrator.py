@@ -86,7 +86,7 @@ class TestDecisionStop:
             new_issue_count=0
         )
         assert decision.action == "STOP"
-        assert "convergência" in decision.reason.lower() or "convergence" in decision.reason.lower()
+        assert "saturação" in decision.reason.lower() or "saturacao" in decision.reason.lower() or "convergência" in decision.reason.lower()
 
     def test_stop_when_no_open_issues_and_converged(self, orchestrator):
         orchestrator.detector.record_round(1, 2)
@@ -245,3 +245,31 @@ class TestZeroLLM:
                 if node.module:
                     assert "model_provider" not in node.module
                     assert "ollama" not in node.module
+
+class TestSemanticSaturation:
+    """Testes para o critério de parada por saturação semântica (W5Q-03)."""
+
+    def test_evaluate_para_por_saturacao(self, orchestrator, board):
+        """W5Q-03: Para se a crítica atual é semanticamente saturada (similar à anterior)."""
+        current_text = "O sistema tem falhas de segurança graves no banco de dados."
+        previous_text = "O sistema tem falhas de segurança graves no banco de dados e rede."
+        
+        # Simular que estamos no round 2 (>= min_rounds padrão que é 2)
+        decision = orchestrator.evaluate(
+            round_num=2,
+            current_round_text=current_text,
+            previous_round_text=previous_text,
+            new_issue_count=0
+        )
+        
+        assert decision.action == "STOP"
+        assert "Saturação Semântica" in decision.reason
+
+    def test_evaluate_registra_motivo_com_threshold(self, orchestrator):
+        """W5Q-03: O motivo do STOP deve citar o threshold de 0.65 (via rastreabilidade)."""
+        current_text = "Idêntico"
+        previous_text = "Idêntico"
+        
+        decision = orchestrator.evaluate(2, current_text, previous_text, 0)
+        
+        assert "Saturação Semântica atingida com threshold 0.65" in decision.reason
